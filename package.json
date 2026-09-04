@@ -1,0 +1,40 @@
+{
+  "name": "hrm-sop-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
+    "start": "node dist/server.js",
+    "db:migrate": "tsx src/database/migrate.ts",
+    "db:migrate:prod": "node dist/database/migrate.js",
+    "db:seed-ui": "tsx src/database/seed-ui.ts",
+    "db:seed-ui:prod": "node dist/database/seed-ui.js",
+    "db:setup": "npm run db:migrate && npm run db:seed-ui",
+    "lint": "oxlint src tests",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/jwt": "^10.2.2",
+    "@fastify/swagger": "^9.8.1",
+    "@fastify/swagger-ui": "^6.1.1",
+    "@sinclair/typebox": "^0.34.52",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.12.1",
+    "mssql": "^12.7.0"
+  },
+  "devDependencies": {
+    "@types/mssql": "^12.3.0",
+    "@types/node": "^26.4.1",
+    "oxlint": "^1.81.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

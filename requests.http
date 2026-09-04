@@ -1,0 +1,20 @@
+@baseUrl = http://127.0.0.1:3000
+@userId = demo-admin
+
+GET {{baseUrl}}/health
+
+###
+GET {{baseUrl}}/ready
+
+###
+GET {{baseUrl}}/api/v1/me
+x-user-id: {{userId}}
+
+###
+GET {{baseUrl}}/api/v1/modules
+x-user-id: {{userId}}
+
+###
+GET {{baseUrl}}/api/v1/sops?includeDrafts=true
+x-user-id: {{userId}}
+
