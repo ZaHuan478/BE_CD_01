@@ -10,14 +10,6 @@ function numberValue(name: string, fallback: number): number {
   return parsed
 }
 
-function booleanValue(name: string, fallback: boolean): boolean {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  if (raw === 'true') return true
-  if (raw === 'false') return false
-  throw new Error(`${name} must be true or false`)
-}
-
 function required(name: string): string {
   const value = process.env[name]?.trim()
   if (!value) throw new Error(`${name} is required`)
@@ -35,15 +27,16 @@ export interface AppEnv {
   jwtSecret?: string
   jwtIssuer?: string
   jwtAudience?: string
-  sql: {
-    server: string
+  database: {
+    host: string
     port: number
-    database: string
+    name: string
     user: string
     password: string
-    encrypt: boolean
-    trustServerCertificate: boolean
     poolMax: number
+    initializeOnStart?: boolean
+    importSnapshot?: string
+    seedDemo?: boolean
   }
 }
 
@@ -80,15 +73,16 @@ export function loadEnv(): AppEnv {
     jwtSecret,
     jwtIssuer,
     jwtAudience,
-    sql: {
-      server: required('SQL_SERVER'),
-      port: numberValue('SQL_PORT', 1433),
-      database: required('SQL_DATABASE'),
-      user: required('SQL_USER'),
-      password: required('SQL_PASSWORD'),
-      encrypt: booleanValue('SQL_ENCRYPT', true),
-      trustServerCertificate: booleanValue('SQL_TRUST_SERVER_CERTIFICATE', false),
-      poolMax: numberValue('SQL_POOL_MAX', 10)
+    database: {
+      host: required('DB_HOST'),
+      port: numberValue('DB_PORT', 3306),
+      name: required('DB_NAME'),
+      user: required('DB_USER'),
+      password: required('DB_PASSWORD'),
+      poolMax: numberValue('DB_POOL_MAX', 10),
+      initializeOnStart: (process.env.DB_INITIALIZE_ON_START ?? (process.env.NODE_ENV === 'production' ? 'false' : 'true')) === 'true',
+      importSnapshot: process.env.DB_IMPORT_SNAPSHOT ?? (process.env.NODE_ENV === 'production' ? '' : 'data/import/legacy-snapshot.json'),
+      seedDemo: process.env.DB_SEED_DEMO === 'true'
     }
   }
 }

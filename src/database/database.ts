@@ -1,79 +1,86 @@
-import sql from 'mssql'
+import mysql, { type Pool, type PoolConnection, type ResultSetHeader } from 'mysql2/promise'
 import type { AppEnv } from '../config/env.js'
 
-export type SqlParameter = string | number | boolean | Date | Buffer | null
-export type SqlParameters = Record<string, SqlParameter>
+export type DatabaseParameter = string | number | boolean | Date | Buffer | null
+export type DatabaseParameters = Record<string, DatabaseParameter>
+// Compatibility aliases retained while repositories are moved module by module.
+export type SqlParameter = DatabaseParameter
+export type SqlParameters = DatabaseParameters
 
 export interface QueryRunner {
-  query<T extends object>(statement: string, parameters?: SqlParameters): Promise<T[]>
+  query<T extends object>(statement: string, parameters?: DatabaseParameters): Promise<T[]>
 }
 
 export interface TransactionalDatabase extends QueryRunner {
   transaction<T>(operation: (runner: QueryRunner) => Promise<T>): Promise<T>
 }
 
-function bindParameters(request: sql.Request, parameters: SqlParameters): void {
-  for (const [name, value] of Object.entries(parameters)) request.input(name, value)
+function normalizeParameters(parameters: DatabaseParameters): DatabaseParameters {
+  return Object.fromEntries(Object.entries(parameters).map(([name, value]) => [
+    name,
+    typeof value === 'boolean' ? Number(value) : value
+  ]))
+}
+
+async function execute<T extends object>(
+  runner: Pool | PoolConnection,
+  statement: string,
+  parameters: DatabaseParameters = {}
+): Promise<T[]> {
+  const [result] = await runner.execute(statement, normalizeParameters(parameters))
+  if (Array.isArray(result)) return result as T[]
+  return [result as ResultSetHeader as T]
 }
 
 export class Database implements TransactionalDatabase {
-  private readonly pool: sql.ConnectionPool
+  private readonly pool: Pool
 
   constructor(env: AppEnv) {
-    this.pool = new sql.ConnectionPool({
-      server: env.sql.server,
-      port: env.sql.port,
-      database: env.sql.database,
-      user: env.sql.user,
-      password: env.sql.password,
-      options: {
-        encrypt: env.sql.encrypt,
-        trustServerCertificate: env.sql.trustServerCertificate,
-        enableArithAbort: true
-      },
-      pool: {
-        max: env.sql.poolMax,
-        min: 0,
-        idleTimeoutMillis: 30_000
-      }
+    this.pool = mysql.createPool({
+      host: env.database.host,
+      port: env.database.port,
+      database: env.database.name,
+      user: env.database.user,
+      password: env.database.password,
+      connectionLimit: env.database.poolMax,
+      namedPlaceholders: true,
+      decimalNumbers: true,
+      supportBigNumbers: true,
+      bigNumberStrings: true,
+      timezone: 'Z',
+      charset: 'utf8mb4'
     })
   }
 
   async connect(): Promise<void> {
-    if (!this.pool.connected) await this.pool.connect()
+    const connection = await this.pool.getConnection()
+    connection.release()
   }
 
   async close(): Promise<void> {
-    if (this.pool.connected) await this.pool.close()
+    await this.pool.end()
   }
 
-  async query<T extends object>(statement: string, parameters: SqlParameters = {}): Promise<T[]> {
-    await this.connect()
-    const request = this.pool.request()
-    bindParameters(request, parameters)
-    const result = await request.query<T>(statement)
-    return result.recordset
+  async query<T extends object>(statement: string, parameters: DatabaseParameters = {}): Promise<T[]> {
+    return execute<T>(this.pool, statement, parameters)
   }
 
   async transaction<T>(operation: (runner: QueryRunner) => Promise<T>): Promise<T> {
-    await this.connect()
-    const transaction = new sql.Transaction(this.pool)
-    await transaction.begin(sql.ISOLATION_LEVEL.READ_COMMITTED)
+    const connection = await this.pool.getConnection()
     const runner: QueryRunner = {
-      query: async <TRow extends object>(statement: string, parameters: SqlParameters = {}) => {
-        const request = new sql.Request(transaction)
-        bindParameters(request, parameters)
-        const result = await request.query<TRow>(statement)
-        return result.recordset
-      }
+      query: <TRow extends object>(statement: string, parameters: DatabaseParameters = {}) =>
+        execute<TRow>(connection, statement, parameters)
     }
     try {
+      await connection.beginTransaction()
       const result = await operation(runner)
-      await transaction.commit()
+      await connection.commit()
       return result
     } catch (error) {
-      try { await transaction.rollback() } catch { /* transaction already closed */ }
+      try { await connection.rollback() } catch { /* transaction already closed */ }
       throw error
+    } finally {
+      connection.release()
     }
   }
 }

@@ -1,4 +1,4 @@
-import type { ModuleDto, ModuleRepository } from '../modules/modules/module.repository.js'
+import type { ModuleDto, ModuleRepository } from '../repositories/module.repository.js'
 import { hasPermission } from './authorization.js'
 import type { AuthPrincipal } from './types.js'
 

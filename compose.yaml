@@ -1,17 +1,22 @@
 services:
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: hrm-sop-sqlserver
+  mysql:
+    image: mysql:8.4
+    container_name: hrm-sop-mysql
     environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_PID: Developer
-      MSSQL_SA_PASSWORD: ${SQL_ADMIN_PASSWORD:?Set SQL_ADMIN_PASSWORD in .env}
+      MYSQL_DATABASE: ${DB_NAME:-hrm_sop}
+      MYSQL_USER: ${DB_USER:-hrm_sop_app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
     ports:
-      - "${SQL_PORT:-1433}:1433"
+      - "${DB_PORT:-3306}:3306"
     volumes:
-      - hrm_sop_sql_data:/var/opt/mssql
+      - hrm_sop_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "--password=${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
 volumes:
-  hrm_sop_sql_data:
-
+  hrm_sop_mysql_data:

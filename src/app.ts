@@ -1,36 +1,40 @@
+import { authRoutes } from './routes/auth.routes.js'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import jwt from '@fastify/jwt'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
-import { AuthRepository } from './auth/auth.repository.js'
-import { AuthService } from './auth/auth.service.js'
+import { AuthRepository } from './repositories/auth.repository.js'
+import { AuthService } from './services/auth.service.js'
 import { AppError } from './common/errors.js'
 import type { AppEnv } from './config/env.js'
 import type { TransactionalDatabase } from './database/database.js'
-import { AccessRepository } from './modules/access/access.repository.js'
-import { accessRoutes } from './modules/access/access.routes.js'
-import { BootstrapRepository } from './modules/bootstrap/bootstrap.repository.js'
-import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
-import { healthRoutes } from './modules/health/health.routes.js'
-import { KnowledgeRepository } from './modules/knowledge/knowledge.repository.js'
-import { knowledgeRoutes } from './modules/knowledge/knowledge.routes.js'
-import { MeRepository } from './modules/me/me.repository.js'
-import { meRoutes } from './modules/me/me.routes.js'
-import { ModuleRepository } from './modules/modules/module.repository.js'
-import { moduleRoutes } from './modules/modules/module.routes.js'
-import { SopRepository } from './modules/sops/sop.repository.js'
-import { sopRoutes } from './modules/sops/sop.routes.js'
+import { AccessRepository } from './repositories/access.repository.js'
+import { accessRoutes } from './routes/access.routes.js'
+import { BootstrapRepository } from './repositories/bootstrap.repository.js'
+import { bootstrapRoutes } from './routes/bootstrap.routes.js'
+import { healthRoutes } from './routes/health.routes.js'
+import { KnowledgeRepository } from './repositories/knowledge.repository.js'
+import { knowledgeRoutes } from './routes/knowledge.routes.js'
+import { MeRepository } from './repositories/me.repository.js'
+import { meRoutes } from './routes/me.routes.js'
+import { ModuleRepository } from './repositories/module.repository.js'
+import { moduleRoutes } from './routes/module.routes.js'
+import { SopRepository } from './repositories/sop.repository.js'
+import { sopRoutes } from './routes/sop.routes.js'
+import { SearchRepository } from './repositories/search.repository.js'
+import { searchRoutes } from './routes/search.routes.js'
+import { SearchService } from './services/search.service.js'
 
 export interface AppDependencies {
   env: AppEnv
   database: TransactionalDatabase
 }
 
-function sqlErrorNumber(error: unknown): number | undefined {
-  if (typeof error !== 'object' || error === null || !('number' in error)) return undefined
-  return typeof error.number === 'number' ? error.number : undefined
+function databaseErrorNumber(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null || !('errno' in error)) return undefined
+  return typeof error.errno === 'number' ? error.errno : undefined
 }
 
 export async function buildApp({ env, database }: AppDependencies): Promise<FastifyInstance> {
@@ -58,7 +62,7 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     openapi: {
       info: {
         title: 'HRM SOP API',
-        description: 'Versioned SOP knowledge API backed by SQL Server',
+        description: 'Versioned SOP knowledge API backed by MySQL',
         version: '0.1.0'
       },
       components: {
@@ -100,14 +104,14 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
       })
       return
     }
-    if ([2601, 2627].includes(sqlErrorNumber(error) ?? 0)) {
+    if (databaseErrorNumber(error) === 1062) {
       void reply.code(409).send({
         error: { code: 'UNIQUE_CONSTRAINT', message: 'A record with the same unique value already exists' },
         requestId: request.id
       })
       return
     }
-    if (sqlErrorNumber(error) === 547) {
+    if ([1451, 1452].includes(databaseErrorNumber(error) ?? 0)) {
       void reply.code(409).send({
         error: { code: 'REFERENCE_CONSTRAINT', message: 'The operation references missing or in-use data' },
         requestId: request.id
@@ -125,32 +129,17 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
   const authService = new AuthService(env, authRepository)
   await app.register(healthRoutes(database))
   await app.register(async (api) => {
-    if (env.authMode === 'development') {
-      api.get('/auth/development-accounts', {
-        schema: { tags: ['Identity'], summary: 'List local demo identities (development only)' }
-      }, async () => ({ items: await authRepository.listDevelopmentAccounts() }))
-      api.post<{ Body: { identifier: string; password: string } }>('/auth/development-login', {
-        schema: {
-          tags: ['Identity'],
-          summary: 'Authenticate a local demo identity (development only)',
-          body: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['identifier', 'password'],
-            properties: {
-              identifier: { type: 'string', minLength: 1, maxLength: 320 },
-              password: { type: 'string', minLength: 1, maxLength: 200 }
-            }
-          }
-        }
-      }, async (request) => authService.loginDevelopment(request.body.identifier, request.body.password))
-    }
+    if (env.authMode === 'development') await api.register(authRoutes(authService))
     const moduleRepository = new ModuleRepository(database)
     await api.register(bootstrapRoutes(authService, new BootstrapRepository(database), moduleRepository))
     await api.register(meRoutes(authService, new MeRepository(database), moduleRepository))
     await api.register(moduleRoutes(authService, moduleRepository))
     const sopRepository = new SopRepository(database)
-    await api.register(sopRoutes(authService, sopRepository))
+    await api.register(sopRoutes(authService, sopRepository, moduleRepository))
+    await api.register(searchRoutes(
+      authService,
+      new SearchService(new SearchRepository(database), moduleRepository)
+    ))
     await api.register(knowledgeRoutes(authService, new KnowledgeRepository(database), sopRepository))
     await api.register(accessRoutes(authService, new AccessRepository(database)))
   }, { prefix: '/api/v1' })

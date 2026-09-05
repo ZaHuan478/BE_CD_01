@@ -4,4 +4,6 @@ dist
 .git
 coverage
 npm-debug.log*
-
+data/import
+.env.*
+!.env.example

@@ -15,6 +15,34 @@ GET {{baseUrl}}/api/v1/modules
 x-user-id: {{userId}}
 
 ###
+GET {{baseUrl}}/api/v1/me/modules
+x-user-id: {{userId}}
+
+###
 GET {{baseUrl}}/api/v1/sops?includeDrafts=true
 x-user-id: {{userId}}
 
+###
+GET {{baseUrl}}/api/v1/modules/emp/sops
+x-user-id: {{userId}}
+
+###
+GET {{baseUrl}}/api/v1/search?q=h%E1%BB%93%20s%C6%A1&moduleId=emp
+x-user-id: {{userId}}
+
+###
+GET {{baseUrl}}/api/v1/admin/users
+x-user-id: {{userId}}
+
+###
+GET {{baseUrl}}/api/v1/admin/users/demo-employee/module-access
+x-user-id: {{userId}}
+
+###
+PUT {{baseUrl}}/api/v1/admin/users/demo-employee/module-access
+x-user-id: {{userId}}
+Content-Type: application/json
+
+{
+  "moduleIds": ["emp", "att", "leave", "ess"]
+}

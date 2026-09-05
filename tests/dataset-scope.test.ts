@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { scopeRuntimeDatasets } from '../src/modules/bootstrap/dataset-scope.js'
+import { scopeRuntimeDatasets } from '../src/common/dataset-scope.js'
 
 const fixture = {
   'coreOperations.config': {
@@ -24,7 +24,8 @@ const fixture = {
       { sopCode: 'SOP PAY01', sopTitle: 'Payroll' },
       { sopCode: 'SOP-EMP-08', sopTitle: 'Employee income review' }
     ],
-    'MODULE-TAX': [{ sopCode: 'SOP-TAX-01', sopTitle: 'Tax' }]
+    'MODULE-TAX': [{ sopCode: 'SOP-TAX-01', sopTitle: 'Tax' }],
+    'LIFE-02': [{ sopCode: 'SOP-EMP-04', sopTitle: 'Employee profile' }]
   },
   'sop.dictionary': {},
   'crossFunctional.registry': {},
@@ -61,5 +62,13 @@ describe('frontend dataset authorization scope', () => {
     expect(core.legalReferences.map((item) => item.id)).toEqual(['tax-law'])
     expect(workflows['LIFE-05']?.map((item) => item.sopCode)).toEqual(['SOP PAY01'])
     expect(workflows['MODULE-TAX']?.map((item) => item.sopCode)).toEqual(['SOP-TAX-01'])
+  })
+
+  it('keeps an authorized shared workflow frame without exposing restricted SOP details', () => {
+    const scoped = scopeRuntimeDatasets(fixture, ['onb'])
+    const workflows = scoped['workflow.sopDatabase'] as Record<string, Array<{ sopCode: string }>>
+
+    expect(workflows['LIFE-02']).toEqual([])
+    expect(workflows['LIFE-05']).toBeUndefined()
   })
 })

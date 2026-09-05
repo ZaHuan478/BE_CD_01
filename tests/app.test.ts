@@ -5,8 +5,8 @@ import type { QueryRunner, SqlParameters, TransactionalDatabase } from '../src/d
 
 class FakeDatabase implements TransactionalDatabase {
   async query<T extends object>(statement: string, parameters: SqlParameters = {}): Promise<T[]> {
-    if (statement.includes('DB_NAME()')) return [{ databaseName: 'HrmSopKnowledge' }] as T[]
-    if (statement.includes('FROM dbo.AppConfig')) {
+    if (statement.includes('DATABASE()')) return [{ databaseName: 'hrm_sop' }] as T[]
+    if (statement.includes('FROM AppConfig')) {
       return [
         {
           ConfigKey: 'ui.dataset.translations',
@@ -18,14 +18,15 @@ class FakeDatabase implements TransactionalDatabase {
         }
       ] as T[]
     }
-    if (statement.includes('(SELECT COUNT(*) FROM dbo.HrModule)')) {
+    if (statement.includes('(SELECT COUNT(*) FROM HrModule)')) {
       return [{ Modules: 1, Sops: 2, Versions: 3, Steps: 4, Transitions: 5, Articles: 6 }] as T[]
     }
-    if (statement.includes('MERGE dbo.PolicyAcknowledgement')) {
+    if (statement.includes('INSERT INTO PolicyAcknowledgement')) return [{ affectedRows: 1 }] as T[]
+    if (statement.includes('FROM PolicyAcknowledgement')) {
       return [{ AcknowledgedAt: new Date('2026-01-02T03:04:05.000Z') }] as T[]
     }
-    if (statement.includes('FROM dbo.PolicyAcknowledgement')) return []
-    if (statement.includes('SELECT TOP (1) a.AccountId')) {
+    if (statement.includes('SELECT a.AccountId, a.Username, a.FullName, a.Email')
+      && statement.includes('LIMIT 1')) {
       if (String(parameters.identifier).toLowerCase() === 'admin.demo@hrm.local'
         || String(parameters.identifier).toLowerCase() === 'demo-admin') {
         return [{
@@ -35,23 +36,12 @@ class FakeDatabase implements TransactionalDatabase {
       }
       return []
     }
-    if (statement.includes('g.GroupCode IN')) {
+    if (statement.includes('a.EmployeeCode') && statement.includes('WHERE a.AccountId = :identity')) {
       return [{
         AccountId: 'demo-admin', Username: 'demo-admin', FullName: 'Lê Quản Trị',
-        Email: 'admin.demo@hrm.local',
-        GroupCode: 'ADMIN', GroupName: 'Quản trị hệ thống',
-        GroupDescription: 'Toàn quyền cấu hình và quản trị hệ thống'
-      }] as T[]
-    }
-    if (statement.includes('INNER JOIN dbo.HrModule module')) {
-      return [
-        { AccountId: 'demo-admin', ModuleId: 'ats', ModuleCode: 'REC', ModuleTitle: 'Tuyển dụng' },
-        { AccountId: 'demo-admin', ModuleId: 'emp', ModuleCode: 'EMP', ModuleTitle: 'Nhân sự' }
-      ] as T[]
-    }
-    if (statement.includes('SELECT a.AccountId')) {
-      return [{
-        AccountId: 'demo-admin', Username: 'demo-admin', FullName: 'Demo Administrator', Email: null
+        Email: 'admin.demo@hrm.local', SystemRole: 'ADMIN', EmployeeCode: 'ADMIN-001',
+        CompanyName: 'LTA', DivisionName: 'Khối quản trị', DepartmentName: 'Phòng nhân sự',
+        TeamName: null, JobTitle: 'Quản trị hệ thống', ManagerAccountId: null
       }] as T[]
     }
     if (statement.includes('SELECT ag.GroupId')) return [{ GroupId: 'group-admin' }] as T[]
@@ -61,7 +51,27 @@ class FakeDatabase implements TransactionalDatabase {
         { PermissionCode: 'permission.manage', ScopeType: 'system', ScopeId: '*' }
       ] as T[]
     }
-    if (statement.includes('FROM dbo.MenuItem')) {
+    if (statement.includes("SELECT 'sop.read' AS PermissionCode")) {
+      return [
+        { PermissionCode: 'sop.read', ScopeType: 'module', ScopeId: 'ats' },
+        { PermissionCode: 'sop.read', ScopeType: 'module', ScopeId: 'emp' }
+      ] as T[]
+    }
+    if (statement.includes('a.SystemRole') && statement.includes('LEFT JOIN AccountGroup')) {
+      return [{
+        AccountId: 'demo-admin', Username: 'demo-admin', FullName: 'Lê Quản Trị',
+        Email: 'admin.demo@hrm.local', SystemRole: 'ADMIN',
+        GroupCode: 'ADMIN', GroupName: 'Quản trị hệ thống',
+        GroupDescription: 'Toàn quyền cấu hình và quản trị hệ thống'
+      }] as T[]
+    }
+    if (statement.includes('CROSS JOIN HrModule module')) {
+      return [
+        { AccountId: 'demo-admin', ModuleId: 'ats', ModuleCode: 'REC', ModuleTitle: 'Tuyển dụng' },
+        { AccountId: 'demo-admin', ModuleId: 'emp', ModuleCode: 'EMP', ModuleTitle: 'Nhân sự' }
+      ] as T[]
+    }
+    if (statement.includes('FROM MenuItem')) {
       return [
         {
           MenuItemId: 'menu-sops', ParentMenuItemId: null, MenuCode: 'SOPS', Title: 'SOPs',
@@ -72,6 +82,42 @@ class FakeDatabase implements TransactionalDatabase {
           RoutePath: '/admin', IconName: 'Settings', RequiredPermissionCode: 'module.manage', SortOrder: 20
         }
       ] as T[]
+    }
+    if (statement.includes('FROM MenuModule')) return []
+    if (statement.includes('COUNT(DISTINCT accessRow.ModuleId) AS AssignedModuleCount')) {
+      return [{
+        AccountId: 'demo-employee', EmployeeCode: 'EMP-001', Username: 'demo-employee',
+        FullName: 'Nhân viên mẫu', Email: 'employee.demo@hrm.local', SystemRole: 'USER',
+        IsActive: true, CompanyName: 'LTA', DivisionName: 'Khối vận hành',
+        DepartmentName: 'Phòng vận hành', TeamName: null, JobTitle: 'Nhân viên',
+        ManagerAccountId: null, AssignedModuleCount: 4
+      }] as T[]
+    }
+    if (statement.includes('SELECT module.ModuleId, module.ModuleCode, module.Title, module.IsCommon')) {
+      return [
+        { ModuleId: 'common', ModuleCode: 'COMMON', Title: 'Thông tin chung', IsCommon: true, GrantSource: null },
+        { ModuleId: 'emp', ModuleCode: 'EMP', Title: 'Hồ sơ nhân viên', IsCommon: false, GrantSource: 'manual' }
+      ] as T[]
+    }
+    if (statement.includes('FROM HrModule') && statement.includes('ORDER BY SortOrder, Title')) {
+      return [
+        {
+          ModuleId: 'common', ModuleCode: 'COMMON', Title: 'Thông tin chung', Description: null,
+          ModuleType: 'foundation', Status: 'published', IsCommon: true, SortOrder: 0,
+          CreatedAt: new Date('2026-01-01'), UpdatedAt: new Date('2026-01-01')
+        },
+        {
+          ModuleId: 'emp', ModuleCode: 'EMP', Title: 'Hồ sơ nhân viên', Description: null,
+          ModuleType: 'business', Status: 'published', IsCommon: false, SortOrder: 20,
+          CreatedAt: new Date('2026-01-01'), UpdatedAt: new Date('2026-01-01')
+        }
+      ] as T[]
+    }
+    if (statement.includes('FROM Sop sop') && statement.includes('version.Definition')) {
+      return [{
+        Id: 'sop-emp-01', Code: 'SOP-EMP-01', Title: 'Cập nhật hồ sơ nhân viên',
+        Excerpt: 'Hướng dẫn cập nhật hồ sơ', ModuleIds: 'emp', UpdatedAt: new Date('2026-01-01')
+      }] as T[]
     }
     return []
   }
@@ -89,9 +135,8 @@ const env: AppEnv = {
   corsOrigins: ['http://localhost:5173'],
   authMode: 'development',
   developmentDemoPassword: '123456',
-  sql: {
-    server: 'unused', port: 1433, database: 'unused', user: 'unused', password: 'unused',
-    encrypt: false, trustServerCertificate: true, poolMax: 1
+  database: {
+    host: 'unused', port: 3306, name: 'unused', user: 'unused', password: 'unused', poolMax: 1
   }
 }
 
@@ -110,7 +155,7 @@ describe('application routes', () => {
     expect(live.statusCode).toBe(200)
     expect(live.json()).toEqual({ status: 'ok' })
     expect(ready.statusCode).toBe(200)
-    expect(ready.json()).toEqual({ status: 'ready', database: 'HrmSopKnowledge' })
+    expect(ready.json()).toEqual({ status: 'ready', database: 'hrm_sop' })
   })
 
   it('loads a development principal and filters menu by permission', async () => {
@@ -176,13 +221,13 @@ describe('application routes', () => {
     })
   })
 
-  it('loads frontend datasets from the SQL Server repository', async () => {
+  it('loads frontend compatibility datasets from the MySQL repository', async () => {
     const app = await buildApp({ env, database: new FakeDatabase() })
     openApps.push(app)
     const response = await app.inject({ method: 'GET', url: '/api/v1/bootstrap', headers: { 'x-user-id': 'demo-admin' } })
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({
-      source: 'sql-server',
+      source: 'mysql',
       release: { releaseId: 'test-release' },
       datasets: { translations: { vi: { common: { title: 'Nhân sự' } } } },
       stats: { modules: 1, sops: 2, articles: 6 }
@@ -202,6 +247,35 @@ describe('application routes', () => {
     expect(response.json()).toEqual({
       acknowledged: true,
       acknowledgedAt: '2026-01-02T03:04:05.000Z'
+    })
+  })
+
+  it('lists users for simple user-module administration', async () => {
+    const app = await buildApp({ env, database: new FakeDatabase() })
+    openApps.push(app)
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/users',
+      headers: { 'x-user-id': 'demo-admin' }
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      data: [{ id: 'demo-employee', employeeCode: 'EMP-001', assignedModuleCount: 4 }]
+    })
+  })
+
+  it('searches only through the authenticated knowledge API', async () => {
+    const app = await buildApp({ env, database: new FakeDatabase() })
+    openApps.push(app)
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/search?q=h%E1%BB%93%20s%C6%A1&moduleId=emp',
+      headers: { 'x-user-id': 'demo-admin' }
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      data: [{ id: 'sop-emp-01', type: 'sop', moduleIds: ['emp'] }],
+      meta: { total: 1 }
     })
   })
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../src/common/errors.js'
-import { validateGraph } from '../src/modules/sops/sop.routes.js'
-import type { SopContentInput } from '../src/modules/sops/sop.schemas.js'
+import { validateGraph } from '../src/routes/sop.routes.js'
+import type { SopContentInput } from '../src/schemas/sop.schemas.js'
 
 const baseStep = {
   id: 'step-1',
@@ -33,4 +33,3 @@ describe('SOP graph validation', () => {
     expect(() => validateGraph(content)).toThrowError(/Unknown toStepId/)
   })
 })
-

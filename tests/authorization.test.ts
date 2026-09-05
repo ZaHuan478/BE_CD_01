@@ -4,6 +4,11 @@ import type { AuthPrincipal } from '../src/auth/types.js'
 
 const principal: AuthPrincipal = {
   accountId: 'account-1', username: 'user', fullName: 'User', email: null, groupIds: ['group-1'],
+  systemRole: 'USER',
+  organization: {
+    employeeCode: null, company: null, division: null, department: null,
+    team: null, jobTitle: null, managerAccountId: null
+  },
   grants: [
     { permissionCode: 'sop.read', scopeType: 'module', scopeId: 'module-1' },
     { permissionCode: 'sop.edit', scopeType: 'sop', scopeId: 'sop-2' }
@@ -21,4 +26,3 @@ describe('scoped authorization', () => {
     expect(hasPermission(principal, 'sop.read', 'sop', 'sop-2')).toBe(false)
   })
 })
-
