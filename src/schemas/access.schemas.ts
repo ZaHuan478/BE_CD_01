@@ -48,3 +48,10 @@ export const replaceUserModulesSchema = Type.Object({
 }, { additionalProperties: false })
 
 export type ReplaceUserModulesBody = Static<typeof replaceUserModulesSchema>
+
+export const updateUserSchema = Type.Partial(Type.Object({
+  active: Type.Boolean(),
+  systemRole: Type.Union([Type.Literal('USER'), Type.Literal('CONTENT_EDITOR'), Type.Literal('ADMIN')])
+}), { additionalProperties: false, minProperties: 1 })
+
+export type UpdateUserBody = Static<typeof updateUserSchema>

@@ -2,6 +2,7 @@ import { authRoutes } from './routes/auth.routes.js'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import jwt from '@fastify/jwt'
+import multipart from '@fastify/multipart'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
@@ -23,9 +24,16 @@ import { ModuleRepository } from './repositories/module.repository.js'
 import { moduleRoutes } from './routes/module.routes.js'
 import { SopRepository } from './repositories/sop.repository.js'
 import { sopRoutes } from './routes/sop.routes.js'
+import { sopImportRoutes } from './routes/sop-import.routes.js'
 import { SearchRepository } from './repositories/search.repository.js'
 import { searchRoutes } from './routes/search.routes.js'
 import { SearchService } from './services/search.service.js'
+import { RuntimeRepository } from './repositories/runtime.repository.js'
+import { runtimeRoutes } from './routes/runtime.routes.js'
+import { KnowledgeReadRepository } from './repositories/knowledge-read.repository.js'
+import { CoreDocumentRepository } from './repositories/core-document.repository.js'
+import { Core8Repository } from './repositories/core8.repository.js'
+import { core8Routes } from './routes/core8.routes.js'
 
 export interface AppDependencies {
   env: AppEnv
@@ -50,6 +58,9 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     allowedHeaders: ['authorization', 'content-type', 'x-request-id', 'x-user-id']
   })
   await app.register(helmet, { contentSecurityPolicy: false })
+  await app.register(multipart, {
+    limits: { files: 1, fields: 8, parts: 9, fileSize: env.upload.maxBytes }
+  })
   if (env.authMode === 'jwt') {
     await app.register(jwt, {
       secret: env.jwtSecret as string,
@@ -125,23 +136,32 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     })
   })
 
-  const authRepository = new AuthRepository(database)
+  const core8 = env.databaseModel === 'core8'
+  const authRepository = new AuthRepository(database, core8)
   const authService = new AuthService(env, authRepository)
   await app.register(healthRoutes(database))
   await app.register(async (api) => {
     if (env.authMode === 'development') await api.register(authRoutes(authService))
     const moduleRepository = new ModuleRepository(database)
-    await api.register(bootstrapRoutes(authService, new BootstrapRepository(database), moduleRepository))
-    await api.register(meRoutes(authService, new MeRepository(database), moduleRepository))
+    await api.register(runtimeRoutes(authService, new RuntimeRepository(database, core8), moduleRepository,
+      core8 ? new CoreDocumentRepository(database) : env.knowledgeReadSource === 'normalized' ? new KnowledgeReadRepository(database) : undefined))
+    if (!core8) await api.register(bootstrapRoutes(authService, new BootstrapRepository(database), moduleRepository))
+    await api.register(meRoutes(authService, new MeRepository(database, core8), moduleRepository))
     await api.register(moduleRoutes(authService, moduleRepository))
+    if (core8) {
+      await api.register(core8Routes(authService, new Core8Repository(database), moduleRepository))
+      await api.register(sopImportRoutes(authService, database, undefined, moduleRepository, env))
+    } else {
     const sopRepository = new SopRepository(database)
     await api.register(sopRoutes(authService, sopRepository, moduleRepository))
+    await api.register(sopImportRoutes(authService, database, sopRepository, moduleRepository, env))
     await api.register(searchRoutes(
       authService,
       new SearchService(new SearchRepository(database), moduleRepository)
     ))
     await api.register(knowledgeRoutes(authService, new KnowledgeRepository(database), sopRepository))
-    await api.register(accessRoutes(authService, new AccessRepository(database)))
+    }
+    await api.register(accessRoutes(authService, new AccessRepository(database, core8), core8))
   }, { prefix: '/api/v1' })
 
   return app

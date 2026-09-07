@@ -78,6 +78,10 @@ Tất cả API nghiệp vụ có prefix `/api/v1`.
 | POST | `/sop-versions/:versionId/submit` | Gửi duyệt |
 | POST | `/sop-versions/:versionId/reject` | Trả về chỉnh sửa, kèm lý do |
 | POST | `/sop-versions/:versionId/publish` | Xuất bản và archive bản cũ trong transaction |
+| GET/POST | `/sop-imports` | Liệt kê hoặc upload DOCX/PDF để tạo bản xem trước SOP |
+| GET/PUT | `/sop-imports/:importId` | Đọc hoặc hiệu chỉnh kết quả số hóa |
+| POST | `/sop-imports/:importId/accept` | Chấp nhận kết quả và tạo SOP draft |
+| GET | `/sop-imports/:importId/source` | Tải lại file nguồn bất biến |
 | GET/POST/PUT | `/accounts`, `/groups`, `/permissions` | Quản trị account, nhóm và scoped grants |
 | GET/POST | `/documents`, `/terms`, `/guidance` | Tài liệu liên kết, thuật ngữ và hướng dẫn |
 | GET | `/search?q=...` | Tìm kiếm SOP/tài liệu/hướng dẫn/thuật ngữ có lọc quyền |

@@ -17,6 +17,8 @@ function required(name: string): string {
 }
 
 export interface AppEnv {
+  databaseModel?: 'legacy' | 'core8'
+  knowledgeReadSource?: 'legacy' | 'normalized'
   nodeEnv: string
   host: string
   port: number
@@ -27,6 +29,10 @@ export interface AppEnv {
   jwtSecret?: string
   jwtIssuer?: string
   jwtAudience?: string
+  upload: {
+    directory: string
+    maxBytes: number
+  }
   database: {
     host: string
     port: number
@@ -41,6 +47,10 @@ export interface AppEnv {
 }
 
 export function loadEnv(): AppEnv {
+  const databaseModel = process.env.DB_MODEL ?? 'legacy'
+  if (databaseModel !== 'legacy' && databaseModel !== 'core8') throw new Error('DB_MODEL must be legacy or core8')
+  const knowledgeReadSource = process.env.KNOWLEDGE_READ_SOURCE ?? 'legacy'
+  if (knowledgeReadSource !== 'legacy' && knowledgeReadSource !== 'normalized') throw new Error('KNOWLEDGE_READ_SOURCE must be legacy or normalized')
   const authMode = (process.env.AUTH_MODE ?? 'development') as AuthMode
   if (!['development', 'jwt'].includes(authMode)) {
     throw new Error('AUTH_MODE must be development or jwt')
@@ -60,6 +70,8 @@ export function loadEnv(): AppEnv {
   }
 
   return {
+    databaseModel,
+    knowledgeReadSource,
     nodeEnv: process.env.NODE_ENV ?? 'development',
     host: process.env.HOST ?? '127.0.0.1',
     port: numberValue('PORT', 3000),
@@ -73,6 +85,10 @@ export function loadEnv(): AppEnv {
     jwtSecret,
     jwtIssuer,
     jwtAudience,
+    upload: {
+      directory: process.env.SOP_UPLOAD_DIR ?? 'data/uploads/sop-imports',
+      maxBytes: numberValue('SOP_UPLOAD_MAX_BYTES', 10 * 1024 * 1024)
+    },
     database: {
       host: required('DB_HOST'),
       port: numberValue('DB_PORT', 3306),

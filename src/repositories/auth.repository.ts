@@ -1,5 +1,6 @@
 import type { QueryRunner } from '../database/database.js'
 import type { AuthPrincipal, PrincipalGrant } from '../auth/types.js'
+import { CoreAuthRepository } from './core-auth.repository.js'
 
 interface AccountRow {
   AccountId: string
@@ -50,9 +51,10 @@ interface DevelopmentLoginAccountRow {
 }
 
 export class AuthRepository {
-  constructor(private readonly database: QueryRunner) {}
+  constructor(private readonly database: QueryRunner, private readonly core8 = false) {}
 
   async findPrincipal(identity: { accountId?: string; externalSubject?: string }): Promise<AuthPrincipal | null> {
+    if (this.core8) return new CoreAuthRepository(this.database).findPrincipal(identity)
     const where = identity.accountId ? 'a.AccountId = :identity' : 'a.ExternalSubject = :identity'
     const identityValue = identity.accountId ?? identity.externalSubject
     if (!identityValue) return null
@@ -139,6 +141,7 @@ export class AuthRepository {
   }
 
   async listDevelopmentAccounts() {
+    if (this.core8) return new CoreAuthRepository(this.database).listDevelopmentAccounts()
     const [rows, moduleRows] = await Promise.all([
       this.database.query<DevelopmentAccountRow>(`
         SELECT a.AccountId, a.Username, a.FullName, a.Email, a.SystemRole,

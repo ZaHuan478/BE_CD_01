@@ -5,7 +5,8 @@ import type {
   CreateAccountBody,
   CreateGroupBody,
   ReplaceGroupGrantsBody,
-  ReplaceUserModulesBody
+  ReplaceUserModulesBody,
+  UpdateUserBody
 } from '../schemas/access.schemas.js'
 
 export class AccessService {
@@ -67,5 +68,10 @@ export class AccessService {
   replaceUserModules(principal: AuthPrincipal, accountId: string, body: ReplaceUserModulesBody) {
     this.authorize(principal)
     return this.repository.replaceUserModules(accountId, body.moduleIds, principal.accountId)
+  }
+
+  updateUser(principal: AuthPrincipal, accountId: string, body: UpdateUserBody) {
+    this.authorize(principal)
+    return this.repository.updateUser(accountId, body, principal.accountId)
   }
 }

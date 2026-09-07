@@ -135,6 +135,7 @@ const env: AppEnv = {
   corsOrigins: ['http://localhost:5173'],
   authMode: 'development',
   developmentDemoPassword: '123456',
+  upload: { directory: 'data/uploads/sop-imports-test', maxBytes: 10 * 1024 * 1024 },
   database: {
     host: 'unused', port: 3306, name: 'unused', user: 'unused', password: 'unused', poolMax: 1
   }
@@ -308,5 +309,13 @@ describe('application routes', () => {
     const response = await app.inject({ method: 'GET', url: '/api/v1/me' })
     expect(response.statusCode).toBe(401)
     expect(response.json()).toMatchObject({ error: { code: 'AUTH_DEVELOPMENT_USER_REQUIRED' } })
+  })
+
+  it('accepts the same-origin development session cookie used by direct API navigation', async () => {
+    const app = await buildApp({ env, database: new FakeDatabase() })
+    openApps.push(app)
+    const response = await app.inject({ method: 'GET', url: '/api/v1/me', headers: { cookie: 'hrm_demo_account_id=demo-admin' } })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ accountId: 'demo-admin' })
   })
 })

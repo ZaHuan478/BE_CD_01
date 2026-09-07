@@ -5,6 +5,8 @@ import type { DatabaseParameters, TransactionalDatabase } from './database.js'
 import { importSnapshot } from './import-snapshot.js'
 import { runMigrations } from './migration-runner.js'
 import { seedUi } from './seed-ui.js'
+import { assertCore8Ready } from './core8-schema.js'
+import { ensureSopImportSchema } from './sop-import-schema.js'
 
 export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promise<void> {
   const pool = mysql.createPool({
@@ -38,7 +40,19 @@ export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promi
           }
         }
       }
+      if (env.databaseModel === 'core8') {
+        await assertCore8Ready(database)
+        await ensureSopImportSchema(database)
+        return
+      }
+      const [coreMarker] = await connection.query<mysql.RowDataPacket[]>(`SELECT TABLE_NAME FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'schemamigration'`)
+      if (coreMarker.length) {
+        const [ready] = await connection.execute<mysql.RowDataPacket[]>("SELECT MigrationId FROM SchemaMigration WHERE MigrationId = 'core8:verified'")
+        if (ready.length) throw new Error('This DB uses core8. Set DB_MODEL=core8; legacy seed/import is disabled.')
+      }
       await runMigrations(connection)
+      await ensureSopImportSchema(database)
       if (schemaOnly) return
       if (env.database.importSnapshot) {
         const result = await importSnapshot(database, env.database.importSnapshot)

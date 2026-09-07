@@ -35,7 +35,6 @@ const fixture = {
   'lifecycle.journey': { scenarios: [], stages: {}, stageOrder: [] },
   'lifecycleStepper.modules': { stepModuleMap: {}, moduleFilterOptions: [] },
   'matrix.subsystems': { subsystems: [], flows: [] },
-  'crossModule.flows': {},
   'policy.registry': [],
   'legacy.data': { lifecycleMockNodes: [] },
   translations: { title: 'shared UI label' }

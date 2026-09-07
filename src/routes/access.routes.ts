@@ -11,15 +11,17 @@ import {
   replaceGroupGrantsSchema,
   replaceUserModulesSchema,
   userListQuerySchema,
+  updateUserSchema,
   type CreateAccountBody,
   type CreateGroupBody,
   type ReplaceAccountGroupsBody,
-  type ReplaceGroupGrantsBody
+  type ReplaceGroupGrantsBody,
+  type UpdateUserBody
 } from '../schemas/access.schemas.js'
 
 interface IdParams { id: string }
 
-export function accessRoutes(authService: AuthService, repository: AccessRepository): FastifyPluginAsync {
+export function accessRoutes(authService: AuthService, repository: AccessRepository, core8 = false): FastifyPluginAsync {
   const controller = new AccessController(authService, new AccessService(repository))
   return async (app) => {
     app.get('/permissions', {
@@ -34,6 +36,7 @@ export function accessRoutes(authService: AuthService, repository: AccessReposit
       schema: { tags: ['Access'], summary: 'Provision an account', body: createAccountSchema }
     }, (request, reply) => controller.createAccount(request, reply))
 
+    if (!core8) {
     app.put<{ Params: IdParams; Body: ReplaceAccountGroupsBody }>('/accounts/:id/groups', {
       schema: {
         tags: ['Access'],
@@ -60,6 +63,7 @@ export function accessRoutes(authService: AuthService, repository: AccessReposit
       }
     }, (request, reply) => controller.replaceGroupGrants(request, reply))
 
+    }
     app.get<{ Querystring: { search?: string } }>('/admin/users', {
       schema: {
         tags: ['Access'],
@@ -67,6 +71,10 @@ export function accessRoutes(authService: AuthService, repository: AccessReposit
         querystring: userListQuerySchema
       }
     }, (request) => controller.listUsers(request))
+
+    app.patch<{ Params: IdParams; Body: UpdateUserBody }>('/admin/users/:id', {
+      schema: { tags: ['Access'], summary: 'Update account status or system role', params: idParamsSchema, body: updateUserSchema }
+    }, (request) => controller.updateUser(request))
 
     app.get<{ Params: IdParams }>('/admin/users/:id/module-access', {
       schema: {

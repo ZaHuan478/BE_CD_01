@@ -126,18 +126,6 @@ function filterConnections(value: unknown, visibleNodeIds: Set<string>): unknown
   })
 }
 
-function filterCluster(cluster: unknown, allowed: Set<string>): unknown {
-  if (!isRecord(cluster) || !Array.isArray(cluster.nodes)) return cluster
-  const nodes = cluster.nodes.filter((node) => isRecord(node) && allowed.has(String(node.id)))
-  const nodeIds = new Set(nodes.filter(isRecord).map((node) => String(node.id)))
-  return {
-    ...cluster,
-    nodes,
-    connections: filterConnections(cluster.connections, nodeIds),
-    edges: filterConnections(cluster.edges, nodeIds)
-  }
-}
-
 function policyMatchesModules(policy: unknown, allowed: Set<string>): boolean {
   if (!isRecord(policy) || !Array.isArray(policy.relatedSopCodes)) return false
   return policy.relatedSopCodes.some((rawCode) => {
@@ -322,21 +310,6 @@ export function scopeRuntimeDatasets(
           && modulesForMasterDataId(item.id).some((moduleId) => allowed.has(moduleId)))
       }
     }).filter((cluster) => isRecord(cluster) && Array.isArray(cluster.items) && cluster.items.length > 0)
-  }
-
-  const crossFlows = scoped['crossModule.flows']
-  if (isRecord(crossFlows)) {
-    crossFlows.core = filterCluster(crossFlows.core, allowed)
-    if (!allowed.has('emp')) {
-      crossFlows.people = filterCluster(crossFlows.people, new Set())
-      crossFlows.organization = filterCluster(crossFlows.organization, new Set())
-    }
-    if (!allowed.has('ess')) crossFlows.platform = filterCluster(crossFlows.platform, new Set())
-    const visibleCrossIds = new Set(allowed)
-    crossFlows.crossClusterNodes = Array.isArray(crossFlows.crossClusterNodes)
-      ? crossFlows.crossClusterNodes.filter((node) => isRecord(node) && visibleCrossIds.has(String(node.id)))
-      : []
-    crossFlows.crossClusterConnections = filterConnections(crossFlows.crossClusterConnections, visibleCrossIds)
   }
 
   const policies = scoped['policy.registry']

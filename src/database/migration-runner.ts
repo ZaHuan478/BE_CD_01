@@ -11,6 +11,8 @@ export async function runMigrations(connection: PoolConnection, includeDemo = fa
       AppliedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ) ENGINE=InnoDB
   `)
+  const [core8] = await connection.execute<RowDataPacket[]>("SELECT MigrationId FROM SchemaMigration WHERE MigrationId = 'core8:verified'")
+  if (core8.length) throw new Error('Legacy migrations are disabled for a verified core8 database')
   const files = (await readdir(directory)).filter((file) => file.endsWith('.mysql.sql')).sort()
   for (const file of files) {
     if (file === '110_mysql_core_seed.mysql.sql' && !includeDemo) continue

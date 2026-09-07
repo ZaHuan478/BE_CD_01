@@ -1,4 +1,5 @@
 import type { QueryRunner } from '../database/database.js'
+import { coreMenu } from '../config/core-menu.js'
 
 export interface MenuItemDto {
   id: string
@@ -24,9 +25,10 @@ interface MenuRow {
 }
 
 export class MeRepository {
-  constructor(private readonly database: QueryRunner) {}
+  constructor(private readonly database: QueryRunner, private readonly core8 = false) {}
 
   async listMenuItems(): Promise<MenuItemDto[]> {
+    if (this.core8) return coreMenu
     const [rows, mappings] = await Promise.all([
       this.database.query<MenuRow>(`
       SELECT MenuItemId, ParentMenuItemId, MenuCode, Title, RoutePath,

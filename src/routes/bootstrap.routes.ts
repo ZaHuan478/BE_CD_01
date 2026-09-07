@@ -23,7 +23,7 @@ export function bootstrapRoutes(
   return async (app) => {
 
     app.get('/bootstrap', {
-      schema: { tags: ['Frontend'], summary: 'Load temporary compatibility datasets from MySQL' }
+      schema: { tags: ['Frontend'], deprecated: true, summary: 'Legacy compatibility only; use incremental knowledge reads' }
     }, (request) => controller.get(request))
 
     app.get<{ Params: PolicyParams }>('/policy-acknowledgements/:policyId', {

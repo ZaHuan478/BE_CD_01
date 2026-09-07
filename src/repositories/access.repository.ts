@@ -6,11 +6,13 @@ import type {
   CreateGroupBody,
   ReplaceGroupGrantsBody
 } from '../schemas/access.schemas.js'
+import type { UpdateUserBody } from '../schemas/access.schemas.js'
 
 export class AccessRepository {
-  constructor(private readonly database: TransactionalDatabase) {}
+  constructor(private readonly database: TransactionalDatabase, private readonly core8 = false) {}
 
   async listPermissions() {
+    if (this.core8) return ['sop.read', 'module.manage', 'permission.manage', 'knowledge.manage'].map(permissionCode => ({ permissionCode, permissionName: permissionCode, description: null }))
     return this.database.query<{ permissionCode: string; permissionName: string; description: string | null }>(`
       SELECT PermissionCode AS permissionCode, PermissionName AS permissionName, Description AS description
       FROM Permission ORDER BY PermissionCode
@@ -18,6 +20,7 @@ export class AccessRepository {
   }
 
   async listAccounts() {
+    if (this.core8) return (await this.listUsers()).map(user => ({ ...user, groupIds: [] }))
     const [rows, memberships] = await Promise.all([
       this.database.query<{
       AccountId: string; ExternalSubject: string | null; Username: string; FullName: string
@@ -218,8 +221,8 @@ export class AccessRepository {
   }
 
   async getUserModuleAccess(accountId: string) {
-    const accounts = await this.database.query<{ AccountId: string; FullName: string }>(`
-      SELECT AccountId, FullName FROM Account WHERE AccountId = :accountId
+    const accounts = await this.database.query<{ AccountId: string; FullName: string; SystemRole?: string; ReadAllModules?: boolean }>(`
+      SELECT AccountId, FullName${this.core8 ? ', SystemRole, ReadAllModules' : ''} FROM Account WHERE AccountId = :accountId
     `, { accountId })
     if (!accounts[0]) throw notFound('Account', accountId)
 
@@ -249,7 +252,8 @@ export class AccessRepository {
         sources: []
       }
       if (row.GrantSource && !module.sources.includes(row.GrantSource)) module.sources.push(row.GrantSource)
-      if (module.common && !module.sources.includes('system')) module.sources.push('system')
+      const globalAccess = this.core8 && (accounts[0].SystemRole === 'ADMIN' || Boolean(accounts[0].ReadAllModules))
+      if ((module.common || globalAccess) && !module.sources.includes('system')) module.sources.push('system')
       modules.set(row.ModuleId, module)
     }
     const allModules = [...modules.values()]
@@ -303,5 +307,30 @@ export class AccessRepository {
       })
     })
     return this.getUserModuleAccess(accountId)
+  }
+
+  async updateUser(accountId: string, body: UpdateUserBody, actorAccountId: string) {
+    await this.database.transaction(async runner => {
+      const [account] = await runner.query<{ AccountId: string; SystemRole: string; IsActive: boolean }>(
+        'SELECT AccountId, SystemRole, IsActive FROM Account WHERE AccountId = :accountId FOR UPDATE', { accountId }
+      )
+      if (!account) throw notFound('Account', accountId)
+      const nextRole = body.systemRole ?? account.SystemRole
+      const nextActive = body.active ?? Boolean(account.IsActive)
+      if (account.SystemRole === 'ADMIN' && account.IsActive && (nextRole !== 'ADMIN' || !nextActive)) {
+        const [admins] = await runner.query<{ Total: number }>("SELECT COUNT(*) AS Total FROM Account WHERE SystemRole = 'ADMIN' AND IsActive = 1")
+        if (Number(admins?.Total) <= 1) throw conflict('LAST_ADMIN', 'The last active administrator cannot be disabled or demoted')
+      }
+      await runner.query('UPDATE Account SET SystemRole = :role, IsActive = :active WHERE AccountId = :accountId', {
+        accountId, role: nextRole, active: nextActive
+      })
+      await runner.query(`INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, BeforeJson, AfterJson)
+        VALUES ('account', :accountId, 'update-account', :actor, :before, :after)`, {
+        accountId, actor: actorAccountId,
+        before: JSON.stringify({ systemRole: account.SystemRole, active: Boolean(account.IsActive) }),
+        after: JSON.stringify({ systemRole: nextRole, active: nextActive })
+      })
+    })
+    return (await this.listUsers()).find(user => user.id === accountId)
   }
 }

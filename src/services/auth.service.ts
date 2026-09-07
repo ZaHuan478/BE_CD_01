@@ -6,6 +6,13 @@ import { AuthRepository } from '../repositories/auth.repository.js'
 import type { AuthPrincipal } from '../auth/types.js'
 
 interface JwtPayload { sub?: string }
+const developmentAccountCookie = 'hrm_demo_account_id'
+
+function readCookie(header: string | undefined, name: string): string | undefined {
+  const encoded = header?.split(';').map(part => part.trim()).find(part => part.startsWith(`${name}=`))?.slice(name.length + 1)
+  if (!encoded) return undefined
+  try { return decodeURIComponent(encoded) } catch { return undefined }
+}
 
 function secureStringEquals(left: string, right: string): boolean {
   const leftDigest = createHash('sha256').update(left, 'utf8').digest()
@@ -41,7 +48,8 @@ export class AuthService {
 
     if (this.env.authMode === 'development') {
       const rawAccountId = request.headers['x-user-id']
-      const accountId = Array.isArray(rawAccountId) ? rawAccountId[0] : rawAccountId
+      const headerAccountId = Array.isArray(rawAccountId) ? rawAccountId[0] : rawAccountId
+      const accountId = headerAccountId || readCookie(request.headers.cookie, developmentAccountCookie)
       if (!accountId) {
         throw new AppError(401, 'AUTH_DEVELOPMENT_USER_REQUIRED', 'Select a development account before calling this endpoint')
       }

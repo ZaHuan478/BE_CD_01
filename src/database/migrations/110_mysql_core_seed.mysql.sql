@@ -68,7 +68,7 @@ INSERT INTO MenuItem (
   ('menu-overview', NULL, 'overview-dashboard', 'Tổng quan', '/employee-lifecycle', 'LayoutDashboard', NULL, 10, TRUE),
   ('menu-lifecycle', NULL, 'employee-lifecycle', 'Vòng đời nhân viên', '/employee-lifecycle', 'Workflow', 'sop.read', 20, TRUE),
   ('menu-policies', NULL, 'policy-center', 'Quy định & Tuân thủ', '/employee-lifecycle/policies', 'ShieldCheck', 'sop.read', 30, TRUE),
-  ('menu-sops', NULL, 'sop-catalog', 'Danh sách quy trình', '/employee-lifecycle', 'BookOpen', 'sop.read', 40, TRUE),
+  ('menu-process-library', NULL, 'process-library', 'Thư viện quy trình', '/employee-lifecycle?tab=process-library&cluster=core', 'BookOpen', 'sop.read', 40, TRUE),
   ('menu-admin', NULL, 'access-admin', 'Quản lý truy cập', '/admin/access', 'Settings', 'permission.manage', 90, TRUE)
 ON DUPLICATE KEY UPDATE MenuItemId = MenuItem.MenuItemId;
 
@@ -76,4 +76,4 @@ INSERT IGNORE INTO MenuModule (MenuItemId, ModuleId)
 SELECT menu.MenuItemId, module.ModuleId
 FROM MenuItem menu
 CROSS JOIN HrModule module
-WHERE menu.MenuItemId IN ('menu-lifecycle', 'menu-policies', 'menu-sops');
+WHERE menu.MenuItemId IN ('menu-lifecycle', 'menu-policies', 'menu-process-library');

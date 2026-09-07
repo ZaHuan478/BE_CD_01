@@ -6,3 +6,4 @@ dist/
 coverage/
 *.log
 data/import/
+data/uploads/

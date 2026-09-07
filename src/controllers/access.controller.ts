@@ -6,7 +6,8 @@ import type {
   CreateGroupBody,
   ReplaceAccountGroupsBody,
   ReplaceGroupGrantsBody,
-  ReplaceUserModulesBody
+  ReplaceUserModulesBody,
+  UpdateUserBody
 } from '../schemas/access.schemas.js'
 
 interface IdParams { id: string }
@@ -88,6 +89,13 @@ export class AccessController {
       await this.authService.authenticate(request),
       request.params.id,
       request.body
+    )
+    return { data, requestId: request.id }
+  }
+
+  async updateUser(request: FastifyRequest<{ Params: IdParams; Body: UpdateUserBody }>) {
+    const data = await this.service.updateUser(
+      await this.authService.authenticate(request), request.params.id, request.body
     )
     return { data, requestId: request.id }
   }
