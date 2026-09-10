@@ -24,6 +24,12 @@ const repository = new RuntimeRepository({ async query<T extends object>(sql: st
 } })
 const modules = { list: async () => ['pay', 'emp'].map(id => ({ id, status: 'published' })) } as unknown as ModuleRepository
 const principal = { accountId: 'test-user', grants: [{ permissionCode: 'sop.read', scopeType: 'module', scopeId: 'emp' }] } as AuthPrincipal
+const employeeWithoutSopGrant = {
+  accountId: 'company-employee', username: 'employee', fullName: 'Nhân viên', email: null,
+  systemRole: 'USER', organization: { employeeCode: 'NV-001', company: 'LTA', division: null,
+    department: 'Kinh doanh', team: null, jobTitle: 'Chuyên viên', managerAccountId: null },
+  groupIds: [], grants: []
+} as AuthPrincipal
 
 describe('incremental knowledge reads', () => {
   it('reads only the requested AppConfig key', async () => {
@@ -56,6 +62,24 @@ describe('incremental knowledge reads', () => {
     const sopPrincipal = { ...principal, grants: [{ permissionCode: 'sop.read', scopeType: 'sop' as const, scopeId: 'one-sop' }] }
     expect((await service.documents(sopPrincipal, {})).data).toEqual([])
     await expect(service.dataset(sopPrincipal, 'page.businessNodes')).rejects.toMatchObject({ statusCode: 403 })
+  })
+  it('makes company policies readable without SOP or module grants', async () => {
+    const companyPolicy = {
+      id: 'POL-COMPANY-01', code: 'POL-COMPANY-01', title: 'Nội quy công ty',
+      summary: 'Áp dụng cho toàn bộ nhân viên', relatedSopCodes: ['SOP-PAY-01']
+    }
+    const policyRepository = {
+      dataset: async (key: string) => key === 'workflow.sopDatabase' ? workflows
+        : key === 'policy.registry' ? [companyPolicy] : {}
+    } as RuntimeRepository
+    const service = new RuntimeService(policyRepository, modules)
+
+    expect(await service.dataset(employeeWithoutSopGrant, 'policy.registry')).toEqual({ data: [companyPolicy] })
+    const page = await service.documents(employeeWithoutSopGrant, { type: 'policy' })
+    expect(page.pagination.total).toBe(1)
+    expect(page.data[0]).toMatchObject({ code: 'POL-COMPANY-01', type: 'policy' })
+    expect((await service.document(employeeWithoutSopGrant, page.data[0]!.id)).data.content).toEqual(companyPolicy)
+    await expect(service.dataset(employeeWithoutSopGrant, 'page.businessNodes')).rejects.toMatchObject({ statusCode: 403 })
   })
   it('bounds query parameters, allowlists datasets and prevents shared response caching', async () => {
     const app = Fastify()

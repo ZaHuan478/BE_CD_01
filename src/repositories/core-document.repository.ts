@@ -1,6 +1,7 @@
 import type { DatabaseParameters, QueryRunner } from '../database/database.js'
 import { notFound } from '../common/errors.js'
 import type { CatalogQuery } from '../schemas/runtime.schemas.js'
+import type { AuthPrincipal } from '../auth/types.js'
 
 export function jsonValue(value: unknown): any { return typeof value === 'string' ? JSON.parse(value) : value }
 const currentJoin = 'JOIN KnowledgeDocumentVersion v ON v.DocumentId = d.DocumentId AND v.VersionNumber = d.CurrentVersionNumber'
@@ -13,6 +14,26 @@ export class CoreDocumentRepository {
     return { parameters, sql: moduleIds.length ? `EXISTS (SELECT 1 FROM KnowledgeDocumentModule dm WHERE dm.DocumentId = d.DocumentId
       AND dm.ModuleId IN (${moduleIds.map((_, i) => `:m${i}`).join(',')}))` : '1=0' }
   }
+  private audience(principal?: AuthPrincipal) {
+    if (!principal || ['ADMIN', 'SUPER_ADMIN'].includes(principal.systemRole)) return { parameters: {}, sql: '1=1' }
+    const parameters: DatabaseParameters = {
+      audienceAccountId: principal.accountId,
+      audienceDepartment: principal.organization.department?.trim() ?? '',
+      audienceJobTitle: principal.organization.jobTitle?.trim() ?? ''
+    }
+    return { parameters, sql: `(NOT EXISTS (
+      SELECT 1 FROM UserDocumentScope unrestricted WHERE unrestricted.DocumentId = d.DocumentId
+    ) OR EXISTS (
+      SELECT 1 FROM UserDocumentScope audience WHERE audience.DocumentId = d.DocumentId AND (
+        audience.CreatedBy = :audienceAccountId
+        OR audience.AudienceMode = 'module'
+        OR (audience.AudienceMode = 'department' AND :audienceDepartment <> '' AND audience.DepartmentName = :audienceDepartment)
+        OR (audience.AudienceMode = 'job_title' AND :audienceJobTitle <> '' AND audience.JobTitle = :audienceJobTitle)
+        OR (audience.AudienceMode = 'department_job_title' AND :audienceDepartment <> '' AND :audienceJobTitle <> ''
+          AND audience.DepartmentName = :audienceDepartment AND audience.JobTitle = :audienceJobTitle)
+      )
+    ))` }
+  }
   private async map(rows: Record<string, any>[], moduleIds: string[]) {
     if (!rows.length) return []
     const links = await this.database.query<{ DocumentId: string; ModuleId: string }>(`SELECT DocumentId, ModuleId FROM KnowledgeDocumentModule
@@ -22,9 +43,12 @@ export class CoreDocumentRepository {
       moduleIds: links.filter(link => link.DocumentId === row.DocumentId && moduleIds.includes(link.ModuleId)).map(link => link.ModuleId).sort(),
       ...(row.ContentJson !== undefined ? { content: jsonValue(row.ContentJson) } : {}) }))
   }
-  async list(moduleIds: string[], query: CatalogQuery) {
+  async list(moduleIds: string[], query: CatalogQuery, principal?: AuthPrincipal) {
     const scope = this.scope(moduleIds)
-    const conditions = [scope.sql, publishedWhere, "d.Visibility = 'module'"]
+    const audience = this.audience(principal)
+    Object.assign(scope.parameters, audience.parameters)
+    const readable = `(d.DocumentType = 'policy' OR (${scope.sql} AND ${audience.sql}))`
+    const conditions = [readable, publishedWhere, "d.Visibility = 'module'"]
     if (query.moduleId) {
       if (!moduleIds.includes(query.moduleId)) conditions.push('1=0')
       conditions.push('EXISTS (SELECT 1 FROM KnowledgeDocumentModule dm WHERE dm.DocumentId = d.DocumentId AND dm.ModuleId = :selected)')
@@ -43,17 +67,21 @@ export class CoreDocumentRepository {
     // Explicit projection; transitional legacy content columns must not leak into list responses.
     return { data: await this.map(rows.map(({ ContentJson: _content, ...row }) => row), moduleIds), pagination: { page, pageSize, total: Number(count?.Total ?? 0) } }
   }
-  async get(moduleIds: string[], id: string) {
+  async get(moduleIds: string[], id: string, principal?: AuthPrincipal) {
     const scope = this.scope(moduleIds)
+    const audience = this.audience(principal)
+    Object.assign(scope.parameters, audience.parameters)
     const rows = await this.database.query<Record<string, any>>(`SELECT d.DocumentId, d.Code, d.Title, d.DocumentType, d.Summary, d.WorkflowId,
       d.CurrentVersionNumber, v.ContentJson FROM KnowledgeDocument d ${currentJoin}
-      WHERE d.DocumentId = :id AND d.Visibility = 'module' AND ${publishedWhere} AND ${scope.sql}`, { ...scope.parameters, id })
+      WHERE d.DocumentId = :id AND d.Visibility = 'module' AND ${publishedWhere}
+        AND (d.DocumentType = 'policy' OR (${scope.sql} AND ${audience.sql}))`, { ...scope.parameters, id })
     if (!rows.length) throw notFound('Document', id)
     const data = (await this.map(rows, moduleIds))[0]!
     const content = data.content
     if (Array.isArray(content?.relatedDocuments)) {
       const visible = await this.database.query<{ DocumentId: string }>(`SELECT d.DocumentId FROM KnowledgeDocument d ${currentJoin}
-        WHERE d.Visibility = 'module' AND ${publishedWhere} AND ${scope.sql}`, scope.parameters)
+        WHERE d.Visibility = 'module' AND ${publishedWhere}
+          AND (d.DocumentType = 'policy' OR (${scope.sql} AND ${audience.sql}))`, scope.parameters)
       const ids = new Set(visible.map(row => row.DocumentId))
       content.relatedDocuments = content.relatedDocuments.filter((ref: unknown) => typeof ref === 'string' && ids.has(ref))
     }

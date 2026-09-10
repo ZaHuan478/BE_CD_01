@@ -126,20 +126,6 @@ function filterConnections(value: unknown, visibleNodeIds: Set<string>): unknown
   })
 }
 
-function policyMatchesModules(policy: unknown, allowed: Set<string>): boolean {
-  if (!isRecord(policy) || !Array.isArray(policy.relatedSopCodes)) return false
-  return policy.relatedSopCodes.some((rawCode) => {
-    const code = String(rawCode).toUpperCase()
-    return (allowed.has('ats') && code.includes('REC'))
-      || (allowed.has('emp') && (code.includes('EMP') || code.includes('NS-')))
-      || ((allowed.has('att') || allowed.has('leave')) && (code.includes('ATT') || code.includes('CC-')))
-      || (allowed.has('pay') && code.includes('PAY'))
-      || (allowed.has('ins') && code.includes('INS'))
-      || (allowed.has('tax') && code.includes('TAX'))
-      || (allowed.has('ess') && code.includes('COM'))
-  })
-}
-
 export function scopeRuntimeDatasets(
   datasets: Record<string, unknown>,
   readableModuleIds: string[]
@@ -311,9 +297,6 @@ export function scopeRuntimeDatasets(
       }
     }).filter((cluster) => isRecord(cluster) && Array.isArray(cluster.items) && cluster.items.length > 0)
   }
-
-  const policies = scoped['policy.registry']
-  if (Array.isArray(policies)) scoped['policy.registry'] = policies.filter((policy) => policyMatchesModules(policy, allowed))
 
   const legacy = scoped['legacy.data']
   if (isRecord(legacy) && Array.isArray(legacy.lifecycleMockNodes)) {

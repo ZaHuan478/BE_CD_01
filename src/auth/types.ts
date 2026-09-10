@@ -11,7 +11,7 @@ export interface AuthPrincipal {
   username: string
   fullName: string
   email: string | null
-  systemRole: 'USER' | 'CONTENT_EDITOR' | 'ADMIN'
+  systemRole: 'USER' | 'CONTENT_EDITOR' | 'ADMIN' | 'SUPER_ADMIN'
   organization: {
     employeeCode: string | null
     company: string | null
@@ -24,3 +24,4 @@ export interface AuthPrincipal {
   groupIds: string[]
   grants: PrincipalGrant[]
 }
+

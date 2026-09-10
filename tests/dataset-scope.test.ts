@@ -13,7 +13,6 @@ const fixture = {
       'SOP-PAY-01': 'MODULE-PAY',
       'SOP-TAX-01': 'MODULE-TAX'
     },
-    knownWireframeIds: [],
     legalReferences: [
       { id: 'employee-law', affectedModules: ['emp'] },
       { id: 'tax-law', affectedModules: ['tax'] }

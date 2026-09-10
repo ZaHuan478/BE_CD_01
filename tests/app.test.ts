@@ -48,7 +48,8 @@ class FakeDatabase implements TransactionalDatabase {
     if (statement.includes('SELECT DISTINCT grantRow.PermissionCode')) {
       return [
         { PermissionCode: 'sop.read', ScopeType: 'system', ScopeId: '*' },
-        { PermissionCode: 'permission.manage', ScopeType: 'system', ScopeId: '*' }
+        { PermissionCode: 'permission.manage', ScopeType: 'system', ScopeId: '*' },
+        { PermissionCode: 'user.read', ScopeType: 'system', ScopeId: '*' }
       ] as T[]
     }
     if (statement.includes("SELECT 'sop.read' AS PermissionCode")) {
@@ -135,6 +136,7 @@ const env: AppEnv = {
   corsOrigins: ['http://localhost:5173'],
   authMode: 'development',
   developmentDemoPassword: '123456',
+  cloudinary: { enabled: false, folder: 'hrm_documents' },
   upload: { directory: 'data/uploads/sop-imports-test', maxBytes: 10 * 1024 * 1024 },
   database: {
     host: 'unused', port: 3306, name: 'unused', user: 'unused', password: 'unused', poolMax: 1
@@ -159,7 +161,7 @@ describe('application routes', () => {
     expect(ready.json()).toEqual({ status: 'ready', database: 'hrm_sop' })
   })
 
-  it('loads a development principal and filters menu by permission', async () => {
+  it('loads a development principal and exposes the admin workspace to an Admin', async () => {
     const app = await buildApp({ env, database: new FakeDatabase() })
     openApps.push(app)
     const response = await app.inject({ method: 'GET', url: '/api/v1/me', headers: { 'x-user-id': 'demo-admin' } })
@@ -167,7 +169,7 @@ describe('application routes', () => {
     expect(response.json()).toMatchObject({
       accountId: 'demo-admin',
       groupIds: ['group-admin'],
-      menuItems: [{ code: 'SOPS' }]
+      menuItems: [{ code: 'SOPS' }, { code: 'ADMIN' }]
     })
   })
 
@@ -319,3 +321,4 @@ describe('application routes', () => {
     expect(response.json()).toMatchObject({ accountId: 'demo-admin' })
   })
 })
+

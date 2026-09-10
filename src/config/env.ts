@@ -33,6 +33,13 @@ export interface AppEnv {
     directory: string
     maxBytes: number
   }
+  cloudinary: {
+    cloudName?: string
+    apiKey?: string
+    apiSecret?: string
+    folder: string
+    enabled: boolean
+  }
   database: {
     host: string
     port: number
@@ -46,7 +53,36 @@ export interface AppEnv {
   }
 }
 
+export function loadCloudinaryEnv(): AppEnv['cloudinary'] {
+  let cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim() || undefined
+  let apiKey = process.env.CLOUDINARY_API_KEY?.trim() || undefined
+  let apiSecret = process.env.CLOUDINARY_API_SECRET?.trim() || undefined
+  // Treat credentials as one set; never mix individual variables with URL credentials.
+  if (!cloudName && !apiKey && !apiSecret && process.env.CLOUDINARY_URL?.trim()) {
+    try {
+      const url = new URL(process.env.CLOUDINARY_URL.trim())
+      if (url.protocol !== 'cloudinary:') throw new Error()
+      cloudName = url.hostname || undefined
+      apiKey = decodeURIComponent(url.username) || undefined
+      apiSecret = decodeURIComponent(url.password) || undefined
+    } catch { throw new Error('CLOUDINARY_URL is invalid') }
+  }
+  if ((cloudName || apiKey || apiSecret) && !(cloudName && apiKey && apiSecret)) {
+    throw new Error('Cloudinary requires CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET together')
+  }
+  const folder = process.env.CLOUDINARY_DOCUMENT_FOLDER?.trim() || 'hrm_documents'
+  if (!/^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(folder) || folder.length > 350) {
+    throw new Error('CLOUDINARY_DOCUMENT_FOLDER must be an ASCII folder path (letters, digits, underscores or hyphens), at most 350 characters')
+  }
+  return {
+    cloudName, apiKey, apiSecret,
+    folder,
+    enabled: Boolean(cloudName && apiKey && apiSecret)
+  }
+}
+
 export function loadEnv(): AppEnv {
+  const cloudinary = loadCloudinaryEnv()
   const databaseModel = process.env.DB_MODEL ?? 'legacy'
   if (databaseModel !== 'legacy' && databaseModel !== 'core8') throw new Error('DB_MODEL must be legacy or core8')
   const knowledgeReadSource = process.env.KNOWLEDGE_READ_SOURCE ?? 'legacy'
@@ -70,6 +106,7 @@ export function loadEnv(): AppEnv {
   }
 
   return {
+    cloudinary,
     databaseModel,
     knowledgeReadSource,
     nodeEnv: process.env.NODE_ENV ?? 'development',

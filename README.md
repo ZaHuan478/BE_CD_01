@@ -48,7 +48,9 @@ Yêu cầu Node.js 22 trở lên và MySQL 8.4. Có thể dùng MySQL cài trự
 2. Nếu dùng Docker, chạy `docker compose up -d`. Volume `hrm_sop_mysql_data` giữ dữ liệu khi container được tạo lại.
 3. Nếu dùng MySQL bên ngoài Docker, tự tạo database và user đúng với các biến `DB_*` trong `.env`.
 4. Để chuyển dữ liệu hiện có, giữ `data/import/legacy-snapshot.json`, đặt `DB_IMPORT_SNAPSHOT` trỏ tới file này và `DB_SEED_DEMO=false`. Database đích phải rỗng. Snapshot không được commit hoặc đưa vào Docker image.
-5. Chạy `npm run dev` với `DB_INITIALIZE_ON_START=true`: Backend tạo schema và nhập snapshot một lần trước khi mở HTTP. Hoặc chạy trước `npm run db:setup`. Tài liệu API tại `http://127.0.0.1:3000/docs`.
+5. Chạy `npm run start` để khởi động Backend local. Dùng `npm run dev` khi cần tự khởi động lại sau mỗi lần sửa mã. Với database legacy mới, đặt `DB_INITIALIZE_ON_START=true` để Backend tạo schema và nhập snapshot một lần trước khi mở HTTP, hoặc chạy trước `npm run db:setup`. Với database core8 đã chuyển đổi, đặt `DB_MODEL=core8`. Tài liệu API tại `http://127.0.0.1:3000/docs`.
+
+Lệnh `npm run start:prod` chạy bản JavaScript trong `dist` sau `npm run build`.
 
 Trong `AUTH_MODE=development`, header `x-user-id` bắt buộc và chọn tài khoản kiểm thử. Chế độ này bị chặn khi `NODE_ENV=production`. Khi tích hợp HRM thật, dùng `AUTH_MODE=jwt`, cấu hình secret, issuer, audience và ánh xạ claim `sub` sang `Account.ExternalSubject`. Adapter hiện tại xác minh JWT bằng secret/key cấu hình trực tiếp; nếu HRM dùng OIDC/JWKS (ví dụ Microsoft Entra ID), cần thay lớp xác minh token bằng public-key/JWKS adapter tương ứng trước khi production.
 

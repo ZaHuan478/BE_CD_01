@@ -7,7 +7,7 @@ import { hasPermission } from '../auth/authorization.js'
 
 export class Core8Service {
   constructor(private readonly repository: Core8Repository, private readonly modules: ModuleRepository) {}
-  private admin(principal: AuthPrincipal) { if (principal.systemRole !== 'ADMIN') throw forbidden('Admin role is required') }
+  private admin(principal: AuthPrincipal) { if (!['ADMIN', 'SUPER_ADMIN'].includes(principal.systemRole)) throw forbidden('Admin role is required') }
   create(principal: AuthPrincipal, body: CoreDocumentBody) { this.admin(principal); return this.repository.create(body, principal.accountId) }
   addVersion(principal: AuthPrincipal, id: string, body: CoreVersionBody) { this.admin(principal); return this.repository.addVersion(id, body, principal.accountId) }
   versions(principal: AuthPrincipal, id: string) { this.admin(principal); return this.repository.versions(id) }
@@ -20,3 +20,4 @@ export class Core8Service {
       : this.repository.setAcknowledgement(principal.accountId, policy.DocumentId, policy.CurrentVersionNumber, acknowledged)
   }
 }
+

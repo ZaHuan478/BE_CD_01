@@ -21,11 +21,11 @@ export class ModuleService {
 
   create(principal: AuthPrincipal, body: CreateModuleBody) {
     requirePermission(principal, 'module.manage')
-    return this.repository.create(body)
+    return this.repository.create(body, principal.accountId)
   }
 
   update(principal: AuthPrincipal, moduleId: string, body: UpdateModuleBody) {
     requirePermission(principal, 'module.manage', 'module', moduleId)
-    return this.repository.update(moduleId, body)
+    return this.repository.update(moduleId, body, principal.accountId)
   }
 }

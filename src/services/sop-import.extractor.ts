@@ -34,22 +34,61 @@ function titleFromFile(fileName: string): string {
   return fileName.replace(/\.(docx|pdf)$/i, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+const actionVerbs = [
+  'chọn', 'nhập', 'kiểm tra', 'vào', 'truy cập', 'mở', 'tạo', 'lưu', 'xuất', 'in',
+  'gửi', 'liên hệ', 'xác nhận', 'đối chiếu', 'phê duyệt', 'duyệt', 'cập nhật', 'thực hiện',
+  'tiếp nhận', 'bàn giao', 'đăng nhập', 'tải', 'đính kèm'
+]
+
+function startsWithAction(value: string): boolean {
+  const normalized = value.toLocaleLowerCase('vi').replace(/^["“”'‘’]+/, '')
+  return actionVerbs.some((verb) => normalized === verb || normalized.startsWith(`${verb} `))
+}
+
+function suggestedKind(title: string, description: string): StepInput['nodeKind'] {
+  const value = `${title}\n${description}`.toLocaleLowerCase('vi')
+  if (/\b(nếu|trường hợp|đối với|tùy theo)\b/u.test(value)) return 'decision'
+  if (/\b(phụ lục|quy trình con)\b/u.test(value)) return 'subprocess'
+  return 'task'
+}
+
+function suggestedTypeCode(title: string, description: string): string {
+  const value = `${title}\n${description}`.toLocaleLowerCase('vi')
+  if (/\b(tự động|tự sinh|hệ thống tự)\b/u.test(value)) return 'A'
+  if (/\b(kiểm tra|đối chiếu|xác nhận)\b/u.test(value)) return 'C'
+  if (/\b(phê duyệt|duyệt)\b/u.test(value)) return 'M'
+  return 'N'
+}
+
 export function extractStepsFromText(text: string): { steps: StepInput[]; warnings: string[] } {
   const lines = text.split(/\r?\n/).map(cleanLine).filter(Boolean)
-  const candidates: Array<{ code: string; title: string; sourceIndex: number }> = []
+  const candidates: Array<{ code?: string; title: string; sourceIndex: number; confidence: number }> = []
   const seen = new Set<string>()
   const codePattern = /^((?:[A-ZĐ]{2,10}[-.]?\d{1,3})(?:\.\d{1,3})?)\s*(?:[-:–—]\s*)?(.{3,})$/u
-  const numberPattern = /^(\d{1,3}(?:\.\d{1,3})+)[.)]?\s+(.{3,})$/
+  const hierarchicalNumberPattern = /^(\d{1,3}(?:\.\d{1,3})+)[.)]?\s+(.{3,})$/
+  const namedStepPattern = /^(?:bước|step)\s*(\d{1,3})\s*[:.)-]?\s+(.{3,})$/iu
+  const numberedActionPattern = /^(\d{1,3})[.)]\s+(.{3,})$/u
+  const letteredActionPattern = /^([A-ZĐ])[.)]\s+(.{3,})$/u
 
   lines.forEach((line, sourceIndex) => {
-    const match = line.match(codePattern) ?? line.match(numberPattern)
+    const coded = line.match(codePattern) ?? line.match(hierarchicalNumberPattern)
+    const named = line.match(namedStepPattern)
+    const numbered = line.match(numberedActionPattern)
+    const lettered = line.match(letteredActionPattern)
+    const match = coded ?? named ?? numbered ?? lettered
     if (!match) return
-    const code = match[1]!.toUpperCase()
     const title = cleanLine(match[2]!)
     const normalizedTitle = title.replace(/[:：]$/, '').toLocaleLowerCase('vi')
-    if (code.startsWith('SOP') || headingTokens.has(normalizedTitle) || seen.has(code)) return
-    seen.add(code)
-    candidates.push({ code, title, sourceIndex })
+    if (headingTokens.has(normalizedTitle)) return
+    if ((numbered || lettered) && !startsWithAction(title)) return
+    if (coded) {
+      const code = match[1]!.toUpperCase()
+      if (code.startsWith('SOP') || seen.has(code)) return
+      seen.add(code)
+      candidates.push({ code, title, sourceIndex, confidence: 0.92 })
+      return
+    }
+    candidates.push({ title, sourceIndex, confidence: named ? 0.84 : numbered ? 0.72 : 0.68 })
   })
 
   const warnings: string[] = []
@@ -60,6 +99,8 @@ export function extractStepsFromText(text: string): { steps: StepInput[]; warnin
         id: 'import-step-1', stableKey: 'import-step-1', code: 'STEP-01',
         title: 'Rà soát nội dung được trích xuất', description: text.slice(0, 20_000),
         actor: null, location: null, timing: null, nodeKind: 'task', sortOrder: 1,
+        confidence: 0.25,
+        sourceRefs: text.trim() ? [{ lineStart: 1, lineEnd: Math.max(1, lines.length), text: text.slice(0, 20_000) }] : [],
         checklist: [], inputs: [], outputs: []
       }],
       warnings
@@ -69,17 +110,26 @@ export function extractStepsFromText(text: string): { steps: StepInput[]; warnin
   const steps = candidates.slice(0, 200).map((candidate, index): StepInput => {
     const nextIndex = candidates[index + 1]?.sourceIndex ?? lines.length
     const description = lines.slice(candidate.sourceIndex + 1, nextIndex).join('\n').slice(0, 20_000)
+    const code = candidate.code ?? `STEP-${String(index + 1).padStart(2, '0')}`
+    const sourceText = lines.slice(candidate.sourceIndex, nextIndex).join('\n').slice(0, 20_000)
     return {
       id: `import-step-${index + 1}`,
       stableKey: `import-step-${index + 1}`,
-      code: candidate.code,
+      code,
       title: candidate.title,
       description: description || null,
       actor: null,
       location: null,
       timing: null,
-      nodeKind: 'task',
+      nodeKind: suggestedKind(candidate.title, description),
+      typeCode: suggestedTypeCode(candidate.title, description),
       sortOrder: index + 1,
+      confidence: candidate.confidence,
+      sourceRefs: [{
+        lineStart: candidate.sourceIndex + 1,
+        lineEnd: Math.max(candidate.sourceIndex + 1, nextIndex),
+        text: sourceText || candidate.title
+      }],
       checklist: [], inputs: [], outputs: []
     }
   })
@@ -93,7 +143,33 @@ async function extractText(buffer: Buffer, mediaType: string, fileName: string):
     const parser = new PDFParse({ data: buffer })
     try {
       const result = await parser.getText()
-      return { text: result.text, parserWarnings: [] }
+      if (result.text.replace(/\s/g, '').length >= 40) return { text: result.text, parserWarnings: [] }
+      try {
+        const screenshots = await parser.getScreenshot({ scale: 1.7, first: 30, imageDataUrl: false, imageBuffer: true })
+        const { createWorker } = await import('tesseract.js')
+        const worker = await createWorker(['vie', 'eng'])
+        try {
+          const pages: string[] = []
+          for (const page of screenshots.pages) {
+            const recognized = await worker.recognize(page.data)
+            pages.push(`Trang ${page.pageNumber}\n${recognized.data.text}`)
+          }
+          const truncatedWarning = screenshots.pages.length >= 30
+            ? ['PDF scan chỉ OCR 30 trang đầu; hãy tách tài liệu nếu cần xử lý thêm.']
+            : []
+          return {
+            text: pages.join('\n\n'),
+            parserWarnings: ['Tài liệu không có lớp chữ; hệ thống đã dùng OCR tiếng Việt và tiếng Anh.', ...truncatedWarning]
+          }
+        } finally {
+          await worker.terminate()
+        }
+      } catch {
+        return {
+          text: result.text,
+          parserWarnings: ['PDF không có lớp chữ và OCR chưa xử lý được. Hãy nhập các bước thủ công hoặc thử lại khi dịch vụ OCR sẵn sàng.']
+        }
+      }
     } finally {
       await parser.destroy()
     }

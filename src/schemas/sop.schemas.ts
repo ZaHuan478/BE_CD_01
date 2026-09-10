@@ -10,6 +10,14 @@ const artifactSchema = Type.Object({
   metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
 }, { additionalProperties: false })
 
+/** Evidence retained from the source document so a reviewer can verify each suggested step. */
+const sourceRefSchema = Type.Object({
+  lineStart: Type.Optional(Type.Integer({ minimum: 1 })),
+  lineEnd: Type.Optional(Type.Integer({ minimum: 1 })),
+  page: Type.Optional(Type.Integer({ minimum: 1 })),
+  text: Type.String({ minLength: 1, maxLength: 20000 })
+}, { additionalProperties: false })
+
 const stepSchema = Type.Object({
   id: Type.String({ minLength: 1, maxLength: 100 }),
   stableKey: Type.String({ minLength: 1, maxLength: 100 }),
@@ -26,8 +34,14 @@ const stepSchema = Type.Object({
     Type.Literal('subprocess'), Type.Literal('end')
   ]),
   typeCode: Type.Optional(Type.Union([Type.String({ maxLength: 20 }), Type.Null()])),
+  positionX: Type.Optional(Type.Number({ minimum: -100000, maximum: 100000 })),
+  positionY: Type.Optional(Type.Number({ minimum: -100000, maximum: 100000 })),
   sortOrder: Type.Integer(),
+  confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+  sourceRefs: Type.Optional(Type.Array(sourceRefSchema, { maxItems: 20 })),
   checklist: Type.Optional(Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 200 })),
+  imageUrl: Type.Optional(Type.Union([Type.String({ maxLength: 2000 }), Type.Null()])),
+  illustrationPreset: Type.Optional(Type.Union([Type.String({ maxLength: 100 }), Type.Null()])),
   inputs: Type.Optional(Type.Array(artifactSchema, { maxItems: 100 })),
   outputs: Type.Optional(Type.Array(artifactSchema, { maxItems: 100 }))
 }, { additionalProperties: false })

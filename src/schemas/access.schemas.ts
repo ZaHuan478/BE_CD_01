@@ -51,7 +51,10 @@ export type ReplaceUserModulesBody = Static<typeof replaceUserModulesSchema>
 
 export const updateUserSchema = Type.Partial(Type.Object({
   active: Type.Boolean(),
-  systemRole: Type.Union([Type.Literal('USER'), Type.Literal('CONTENT_EDITOR'), Type.Literal('ADMIN')])
+  systemRole: Type.Union([Type.Literal('USER'), Type.Literal('CONTENT_EDITOR'), Type.Literal('ADMIN'), Type.Literal('SUPER_ADMIN')]),
+  department: Type.Union([Type.String({ maxLength: 255 }), Type.Null()]),
+  jobTitle: Type.Union([Type.String({ maxLength: 255 }), Type.Null()])
 }), { additionalProperties: false, minProperties: 1 })
 
 export type UpdateUserBody = Static<typeof updateUserSchema>
+

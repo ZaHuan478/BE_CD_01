@@ -8,18 +8,29 @@ import type { ModuleRepository } from '../repositories/module.repository.js'
 import type { CatalogQuery } from '../schemas/runtime.schemas.js'
 import type { KnowledgeReadRepository } from '../repositories/knowledge-read.repository.js'
 
+interface DocumentReader {
+  list(moduleIds: string[], query: CatalogQuery, principal?: AuthPrincipal): ReturnType<KnowledgeReadRepository['list']>
+  get(moduleIds: string[], id: string, principal?: AuthPrincipal): ReturnType<KnowledgeReadRepository['get']>
+}
+
 export class RuntimeService {
   constructor(private readonly repository: RuntimeRepository, private readonly modules: ModuleRepository,
-    private readonly normalized?: Pick<KnowledgeReadRepository, 'list' | 'get'>) {}
+    private readonly normalized?: DocumentReader) {}
 
-  private async readableModules(principal: AuthPrincipal): Promise<string[]> {
-    if (!hasAnyPermission(principal, 'sop.read')) throw forbidden('Permission sop.read is required')
+  private async readableModules(principal: AuthPrincipal, allowPolicyOnly = false): Promise<string[]> {
+    if (!hasAnyPermission(principal, 'sop.read')) {
+      if (allowPolicyOnly) return []
+      throw forbidden('Permission sop.read is required')
+    }
     // A grant for one SOP must not elevate access to every document in its module.
     return (await this.modules.list()).filter(module => module.status === 'published'
       && hasPermission(principal, 'sop.read', 'module', module.id)).map(module => module.id)
   }
 
   private async scoped(key: string, principal: AuthPrincipal): Promise<unknown> {
+    // The policy registry contains company-wide rules and is readable by every
+    // authenticated account, independent of module/SOP grants.
+    if (key === 'policy.registry') return this.repository.dataset(key)
     const moduleIds = await this.readableModules(principal)
     if (!moduleIds.length && key !== 'translations') throw forbidden('A published module read grant is required')
     return scopeRuntimeDatasets({ [key]: await this.repository.dataset(key) }, moduleIds)[key]
@@ -40,17 +51,19 @@ export class RuntimeService {
   }
 
   private async catalog(principal: AuthPrincipal) {
-    const moduleIds = await this.readableModules(principal)
+    const moduleIds = await this.readableModules(principal, true)
     const [workflows, policies] = await Promise.all([
       this.repository.dataset('workflow.sopDatabase'), this.repository.dataset('policy.registry')
     ])
     return buildKnowledgeCatalog(workflows, policies)
-      .filter(document => document.moduleIds.some(id => moduleIds.includes(id)))
-      .map(document => ({ ...document, moduleIds: document.moduleIds.filter(id => moduleIds.includes(id)) }))
+      .filter(document => document.type === 'policy' || document.moduleIds.some(id => moduleIds.includes(id)))
+      .map(document => document.type === 'policy'
+        ? document
+        : { ...document, moduleIds: document.moduleIds.filter(id => moduleIds.includes(id)) })
   }
 
   async documents(principal: AuthPrincipal, query: CatalogQuery) {
-    if (this.normalized) return this.normalized.list(await this.readableModules(principal), query)
+    if (this.normalized) return this.normalized.list(await this.readableModules(principal, true), query, principal)
     const normalize = (text: string) => text.toLocaleLowerCase('vi').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd')
     const q = normalize(query.q?.trim() ?? '')
     // Authorization precedes filtering, counting and pagination.
@@ -65,7 +78,7 @@ export class RuntimeService {
   }
 
   async document(principal: AuthPrincipal, id: string) {
-    if (this.normalized) return this.normalized.get(await this.readableModules(principal), id)
+    if (this.normalized) return this.normalized.get(await this.readableModules(principal, true), id, principal)
     const document = (await this.catalog(principal)).find(item => item.id === id)
     if (!document) throw notFound('Document', id)
     return { data: { ...summarizeDocument(document), content: document.content } }

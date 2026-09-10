@@ -5,6 +5,10 @@ import { Database } from './database/database.js'
 import { initializeDatabase } from './database/initialize.js'
 import { assertCore8Ready, tableExists, core8Marker } from './database/core8-schema.js'
 import { ensureSopImportSchema } from './database/sop-import-schema.js'
+import { ensureAdministrationSchema } from './database/administration-schema.js'
+import { ensureHruxSopLibrary } from './database/hrux-sop-library.js'
+import { ensureUserDocumentSchema } from './database/user-document-schema.js'
+import { ensureModuleNavigationSchema } from './database/module-navigation-schema.js'
 
 const env = loadEnv()
 const database = new Database(env)
@@ -29,7 +33,19 @@ try {
     if (marker.length) throw new Error('This database uses core8. Set DB_MODEL=core8 before starting the backend.')
   }
   await ensureSopImportSchema(database)
+  await ensureAdministrationSchema(database)
+  await ensureUserDocumentSchema(database)
+  await ensureModuleNavigationSchema(database)
+  if (env.databaseModel === 'core8') await ensureHruxSopLibrary(database)
+  app.log.info(
+    { database: env.database.name, databaseModel: env.databaseModel },
+    'Connect database successfully'
+  )
   await app.listen({ host: env.host, port: env.port })
+  app.log.info(
+    { host: env.host, port: env.port },
+    'Backend started successfully'
+  )
 } catch (error) {
   app.log.error(error)
   await database.close()

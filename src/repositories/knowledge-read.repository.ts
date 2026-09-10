@@ -14,8 +14,9 @@ export class KnowledgeReadRepository {
   private scope(moduleIds: string[]) {
     const parameters: DatabaseParameters = Object.fromEntries(moduleIds.map((id, index) => [`module${index}`, id]))
     const placeholders = moduleIds.map((_, index) => `:module${index}`).join(', ')
-    return { parameters, sql: moduleIds.length ? `EXISTS (SELECT 1 FROM KnowledgeDocumentModule dm
-      WHERE dm.DocumentId = d.DocumentId AND dm.ModuleId IN (${placeholders}))` : '1 = 0' }
+    const moduleScope = moduleIds.length ? `EXISTS (SELECT 1 FROM KnowledgeDocumentModule dm
+      WHERE dm.DocumentId = d.DocumentId AND dm.ModuleId IN (${placeholders}))` : '1 = 0'
+    return { parameters, sql: `(d.DocumentType = 'policy' OR ${moduleScope})` }
   }
   private async summaries(rows: DocumentRow[], readableModules: string[]) {
     if (!rows.length) return []

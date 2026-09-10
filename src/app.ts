@@ -34,6 +34,10 @@ import { KnowledgeReadRepository } from './repositories/knowledge-read.repositor
 import { CoreDocumentRepository } from './repositories/core-document.repository.js'
 import { Core8Repository } from './repositories/core8.repository.js'
 import { core8Routes } from './routes/core8.routes.js'
+import { administrationRoutes } from './routes/administration.routes.js'
+import { userDocumentRoutes } from './routes/user-document.routes.js'
+import { SopWorkspaceRepository } from './repositories/sop-workspace.repository.js'
+import { sopWorkspaceRoutes } from './routes/sop-workspace.routes.js'
 
 export interface AppDependencies {
   env: AppEnv
@@ -142,7 +146,7 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
   await app.register(healthRoutes(database))
   await app.register(async (api) => {
     if (env.authMode === 'development') await api.register(authRoutes(authService))
-    const moduleRepository = new ModuleRepository(database)
+    const moduleRepository = new ModuleRepository(database, core8)
     await api.register(runtimeRoutes(authService, new RuntimeRepository(database, core8), moduleRepository,
       core8 ? new CoreDocumentRepository(database) : env.knowledgeReadSource === 'normalized' ? new KnowledgeReadRepository(database) : undefined))
     if (!core8) await api.register(bootstrapRoutes(authService, new BootstrapRepository(database), moduleRepository))
@@ -162,6 +166,9 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     await api.register(knowledgeRoutes(authService, new KnowledgeRepository(database), sopRepository))
     }
     await api.register(accessRoutes(authService, new AccessRepository(database, core8), core8))
+    await api.register(administrationRoutes(authService, database, core8))
+    await api.register(userDocumentRoutes(authService, database, env))
+    await api.register(sopWorkspaceRoutes(authService, new SopWorkspaceRepository(database)))
   }, { prefix: '/api/v1' })
 
   return app

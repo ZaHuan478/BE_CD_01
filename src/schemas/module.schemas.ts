@@ -9,6 +9,13 @@ export const createModuleSchema = Type.Object({
   title: Type.String({ minLength: 1, maxLength: 250 }),
   description: Type.Optional(Type.Union([Type.String({ maxLength: 10000 }), Type.Null()])),
   moduleType: Type.String({ minLength: 1, maxLength: 100 }),
+  businessCluster: Type.Optional(Type.Union([
+    Type.Literal('core'), Type.Literal('people'), Type.Literal('organization'), Type.Literal('platform')
+  ])),
+  iconKey: Type.Optional(Type.Union([
+    Type.Literal('layers'), Type.Literal('users'), Type.Literal('briefcase'), Type.Literal('clipboard'),
+    Type.Literal('clock'), Type.Literal('calendar'), Type.Literal('wallet'), Type.Literal('shield'), Type.Literal('book')
+  ])),
   status: Type.Optional(Type.Union([
     Type.Literal('draft'), Type.Literal('published'), Type.Literal('archived')
   ])),

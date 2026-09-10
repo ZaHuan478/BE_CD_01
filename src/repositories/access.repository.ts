@@ -180,7 +180,7 @@ export class AccessRepository {
     const parameters: Record<string, string> = search ? { search: `%${search}%` } : {}
     const rows = await this.database.query<{
       AccountId: string; EmployeeCode: string | null; Username: string; FullName: string
-      Email: string | null; SystemRole: 'USER' | 'CONTENT_EDITOR' | 'ADMIN'; IsActive: boolean
+      Email: string | null; SystemRole: 'USER' | 'CONTENT_EDITOR' | 'ADMIN' | 'SUPER_ADMIN'; IsActive: boolean
       CompanyName: string | null; DivisionName: string | null; DepartmentName: string | null
       TeamName: string | null; JobTitle: string | null; ManagerAccountId: string | null
       AssignedModuleCount: number
@@ -252,7 +252,7 @@ export class AccessRepository {
         sources: []
       }
       if (row.GrantSource && !module.sources.includes(row.GrantSource)) module.sources.push(row.GrantSource)
-      const globalAccess = this.core8 && (accounts[0].SystemRole === 'ADMIN' || Boolean(accounts[0].ReadAllModules))
+      const globalAccess = this.core8 && (['ADMIN', 'SUPER_ADMIN'].includes(accounts[0].SystemRole ?? '') || Boolean(accounts[0].ReadAllModules))
       if ((module.common || globalAccess) && !module.sources.includes('system')) module.sources.push('system')
       modules.set(row.ModuleId, module)
     }
@@ -311,26 +311,30 @@ export class AccessRepository {
 
   async updateUser(accountId: string, body: UpdateUserBody, actorAccountId: string) {
     await this.database.transaction(async runner => {
-      const [account] = await runner.query<{ AccountId: string; SystemRole: string; IsActive: boolean }>(
-        'SELECT AccountId, SystemRole, IsActive FROM Account WHERE AccountId = :accountId FOR UPDATE', { accountId }
+      const [account] = await runner.query<{ AccountId: string; SystemRole: string; IsActive: boolean; DepartmentName: string | null; JobTitle: string | null }>(
+        'SELECT AccountId, SystemRole, IsActive, DepartmentName, JobTitle FROM Account WHERE AccountId = :accountId FOR UPDATE', { accountId }
       )
       if (!account) throw notFound('Account', accountId)
       const nextRole = body.systemRole ?? account.SystemRole
       const nextActive = body.active ?? Boolean(account.IsActive)
-      if (account.SystemRole === 'ADMIN' && account.IsActive && (nextRole !== 'ADMIN' || !nextActive)) {
-        const [admins] = await runner.query<{ Total: number }>("SELECT COUNT(*) AS Total FROM Account WHERE SystemRole = 'ADMIN' AND IsActive = 1")
-        if (Number(admins?.Total) <= 1) throw conflict('LAST_ADMIN', 'The last active administrator cannot be disabled or demoted')
+      const nextDepartment = body.department === undefined ? account.DepartmentName : body.department?.trim() || null
+      const nextJobTitle = body.jobTitle === undefined ? account.JobTitle : body.jobTitle?.trim() || null
+      if (account.SystemRole === 'SUPER_ADMIN' && account.IsActive && (nextRole !== 'SUPER_ADMIN' || !nextActive)) {
+        const [admins] = await runner.query<{ Total: number }>("SELECT COUNT(*) AS Total FROM Account WHERE SystemRole = 'SUPER_ADMIN' AND IsActive = 1")
+        if (Number(admins?.Total) <= 1) throw conflict('LAST_SUPER_ADMIN', 'The last active super administrator cannot be disabled or demoted')
       }
-      await runner.query('UPDATE Account SET SystemRole = :role, IsActive = :active WHERE AccountId = :accountId', {
-        accountId, role: nextRole, active: nextActive
+      await runner.query(`UPDATE Account SET SystemRole = :role, IsActive = :active,
+        DepartmentName = :department, JobTitle = :jobTitle WHERE AccountId = :accountId`, {
+        accountId, role: nextRole, active: nextActive, department: nextDepartment, jobTitle: nextJobTitle
       })
       await runner.query(`INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, BeforeJson, AfterJson)
         VALUES ('account', :accountId, 'update-account', :actor, :before, :after)`, {
         accountId, actor: actorAccountId,
-        before: JSON.stringify({ systemRole: account.SystemRole, active: Boolean(account.IsActive) }),
-        after: JSON.stringify({ systemRole: nextRole, active: nextActive })
+        before: JSON.stringify({ systemRole: account.SystemRole, active: Boolean(account.IsActive), department: account.DepartmentName, jobTitle: account.JobTitle }),
+        after: JSON.stringify({ systemRole: nextRole, active: nextActive, department: nextDepartment, jobTitle: nextJobTitle })
       })
     })
     return (await this.listUsers()).find(user => user.id === accountId)
   }
 }
+

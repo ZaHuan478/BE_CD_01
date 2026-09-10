@@ -9,7 +9,7 @@ const routeFiles = routeNames.map((file) => join(root, 'routes', file))
 describe('HTTP layer boundaries', () => {
   it('groups API areas into matching route, controller, service and repository folders', () => {
     expect(routeNames.map((file) => file.replace('.routes.ts', ''))).toEqual([
-      'access', 'auth', 'bootstrap', 'core8', 'health', 'knowledge', 'me', 'module', 'runtime', 'search', 'sop-import', 'sop'
+      'access', 'administration', 'auth', 'bootstrap', 'core8', 'health', 'knowledge', 'me', 'module', 'runtime', 'search', 'sop-import', 'sop-workspace', 'sop', 'user-document'
     ])
     for (const route of routeNames) {
       for (const [folder, suffix] of [['controllers', 'controller'], ['services', 'service'], ['repositories', 'repository']]) {
@@ -26,3 +26,17 @@ describe('HTTP layer boundaries', () => {
     })
   }
 })
+
+describe('runtime schema readiness', () => {
+  it('ensures additive SOP schemas before accepting requests', () => {
+    const server = readFileSync(join(root, 'server.ts'), 'utf8')
+    const listenPosition = server.indexOf('await app.listen')
+
+    expect(server).toContain('await ensureSopImportSchema(database)')
+    expect(server).toContain('await ensureAdministrationSchema(database)')
+    expect(server).toContain('await ensureUserDocumentSchema(database)')
+    expect(server).toContain('await ensureModuleNavigationSchema(database)')
+    expect(server.indexOf('await ensureAdministrationSchema(database)')).toBeLessThan(listenPosition)
+  })
+})
+

@@ -7,6 +7,10 @@ import { runMigrations } from './migration-runner.js'
 import { seedUi } from './seed-ui.js'
 import { assertCore8Ready } from './core8-schema.js'
 import { ensureSopImportSchema } from './sop-import-schema.js'
+import { ensureAdministrationSchema } from './administration-schema.js'
+import { ensureHruxSopLibrary } from './hrux-sop-library.js'
+import { ensureUserDocumentSchema } from './user-document-schema.js'
+import { ensureModuleNavigationSchema } from './module-navigation-schema.js'
 
 export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promise<void> {
   const pool = mysql.createPool({
@@ -43,6 +47,10 @@ export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promi
       if (env.databaseModel === 'core8') {
         await assertCore8Ready(database)
         await ensureSopImportSchema(database)
+        await ensureAdministrationSchema(database)
+        await ensureHruxSopLibrary(database)
+        await ensureUserDocumentSchema(database)
+        await ensureModuleNavigationSchema(database)
         return
       }
       const [coreMarker] = await connection.query<mysql.RowDataPacket[]>(`SELECT TABLE_NAME FROM information_schema.TABLES
@@ -53,6 +61,9 @@ export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promi
       }
       await runMigrations(connection)
       await ensureSopImportSchema(database)
+      await ensureAdministrationSchema(database)
+      await ensureUserDocumentSchema(database)
+      await ensureModuleNavigationSchema(database)
       if (schemaOnly) return
       if (env.database.importSnapshot) {
         const result = await importSnapshot(database, env.database.importSnapshot)
@@ -71,3 +82,5 @@ export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promi
     await pool.end()
   }
 }
+
+
