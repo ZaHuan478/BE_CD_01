@@ -10,6 +10,12 @@ function numberValue(name: string, fallback: number): number {
   return parsed
 }
 
+function boundedNumber(name: string, fallback: number, minimum: number, maximum: number): number {
+  const value = numberValue(name, fallback)
+  if (value < minimum || value > maximum) throw new Error(`${name} must be between ${minimum} and ${maximum}`)
+  return value
+}
+
 function required(name: string): string {
   const value = process.env[name]?.trim()
   if (!value) throw new Error(`${name} is required`)
@@ -39,6 +45,17 @@ export interface AppEnv {
     apiSecret?: string
     folder: string
     enabled: boolean
+  }
+  gemini: {
+    apiKey?: string
+    embeddingModel: string
+    embeddingDimension: number
+    chatModel: string
+  }
+  rag: {
+    topK: number
+    similarityThreshold: number
+    chunkMaxTokens: number
   }
   database: {
     host: string
@@ -125,6 +142,17 @@ export function loadEnv(): AppEnv {
     upload: {
       directory: process.env.SOP_UPLOAD_DIR ?? 'data/uploads/sop-imports',
       maxBytes: numberValue('SOP_UPLOAD_MAX_BYTES', 10 * 1024 * 1024)
+    },
+    gemini: {
+      apiKey: process.env.GEMINI_API_KEY?.trim() || undefined,
+      embeddingModel: process.env.GEMINI_EMBEDDING_MODEL?.trim() || 'gemini-embedding-001',
+      embeddingDimension: boundedNumber('GEMINI_EMBEDDING_DIMENSION', 768, 128, 3072),
+      chatModel: process.env.GEMINI_CHAT_MODEL?.trim() || 'gemini-2.5-flash'
+    },
+    rag: {
+      topK: boundedNumber('RAG_TOP_K', 5, 1, 20),
+      similarityThreshold: boundedNumber('RAG_SIMILARITY_THRESHOLD', 0.65, 0, 1),
+      chunkMaxTokens: boundedNumber('RAG_CHUNK_MAX_TOKENS', 500, 100, 2000)
     },
     database: {
       host: required('DB_HOST'),

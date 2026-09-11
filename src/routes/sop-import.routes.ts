@@ -10,6 +10,7 @@ import { createDocumentConversionSchema, reviewSopImportSchema, sopImportParamsS
 import type { AuthService } from '../services/auth.service.js'
 import { SopImportService } from '../services/sop-import.service.js'
 import { SopService } from '../services/sop.service.js'
+import type { IndexingService } from '../services/rag/indexing.service.js'
 
 interface ImportParams { importId: string }
 
@@ -18,11 +19,12 @@ export function sopImportRoutes(
   database: TransactionalDatabase,
   sopRepository: SopRepository | undefined,
   moduleRepository: ModuleRepository,
-  env: AppEnv
+  env: AppEnv,
+  indexingService?: IndexingService
 ): FastifyPluginAsync {
   const controller = new SopImportController(auth, new SopImportService(
     new SopImportRepository(database), new UserDocumentRepository(database),
-    sopRepository ? new SopService(sopRepository, moduleRepository) : undefined, env
+    sopRepository ? new SopService(sopRepository, moduleRepository) : undefined, env, indexingService
   ))
   return async (app) => {
     app.post<{ Body: CreateDocumentConversionBody }>('/document-conversions', {

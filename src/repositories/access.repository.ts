@@ -12,7 +12,11 @@ export class AccessRepository {
   constructor(private readonly database: TransactionalDatabase, private readonly core8 = false) {}
 
   async listPermissions() {
-    if (this.core8) return ['sop.read', 'module.manage', 'permission.manage', 'knowledge.manage'].map(permissionCode => ({ permissionCode, permissionName: permissionCode, description: null }))
+    if (this.core8) return [
+      'sop.read', 'sop.create', 'sop.edit', 'sop.review', 'sop.publish', 'sop.archive',
+      'module.manage', 'knowledge.manage', 'rag.manage', 'audit.read', 'user.read',
+      'user.manage', 'permission.manage', 'settings.manage'
+    ].map(permissionCode => ({ permissionCode, permissionName: permissionCode, description: null }))
     return this.database.query<{ permissionCode: string; permissionName: string; description: string | null }>(`
       SELECT PermissionCode AS permissionCode, PermissionName AS permissionName, Description AS description
       FROM Permission ORDER BY PermissionCode

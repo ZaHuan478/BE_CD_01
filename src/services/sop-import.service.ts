@@ -13,6 +13,7 @@ import type { SopService } from './sop.service.js'
 import { extractSopPreview } from './sop-import.extractor.js'
 import { validateGraph } from './sop.service.js'
 import { buildMermaidSource, inspectSopGraph } from './sop-flowchart.js'
+import type { IndexingService } from './rag/indexing.service.js'
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 type AudienceMode = NonNullable<SopImportUpload['audienceMode']>
@@ -61,7 +62,8 @@ export class SopImportService {
     private readonly repository: SopImportRepository,
     private readonly userDocumentRepository: UserDocumentRepository,
     private readonly sopService: SopService | undefined,
-    private readonly env: AppEnv
+    private readonly env: AppEnv,
+    private readonly indexingService?: IndexingService
   ) {}
 
   private get storage() { return new DocumentStorage(this.env) }
@@ -301,7 +303,13 @@ export class SopImportService {
       await this.sopService.publish(principal, item.targetVersionId)
       await this.repository.markPublished(id, principal.accountId)
     }
-    return this.repository.get(id)
+    const published = await this.repository.get(id)
+    // This only writes a local pending status. Embeddings are created later by
+    // an explicit administrator re-index action.
+    if (published.targetSopId && this.indexingService) {
+      try { await this.indexingService.markPending(published.targetSopId, 'auto_publish') } catch { /* reconcile from admin */ }
+    }
+    return published
   }
 }
 

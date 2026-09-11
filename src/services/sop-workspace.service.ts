@@ -11,6 +11,7 @@ import {
   type DraftRow,
   type State
 } from '../repositories/sop-workspace.repository.js'
+import type { IndexingService } from './rag/indexing.service.js'
 
 export type { Action, DraftRow, State }
 
@@ -86,7 +87,10 @@ export function workspacePreview(doc: { Code: string; Title: string; Summary: st
 }
 
 export class SopWorkspaceService {
-  constructor(private readonly repository: SopWorkspaceRepository) {}
+  constructor(
+    private readonly repository: SopWorkspaceRepository,
+    private readonly indexingService?: IndexingService
+  ) {}
 
   private preview(row: DraftRow): CreateSopBody {
     return jsonValue(row.PreviewJson)
@@ -207,6 +211,7 @@ export class SopWorkspaceService {
   }
 
   async action(p: AuthPrincipal, id: string, revision: number, action: Action, note?: string) {
+    let changedDocumentId: string | null = null
     await this.repository.transaction(async runner => {
       const row = await this.repository.findDraftById(id, true, runner)
       if (!row) throw notFound('SOP draft', id)
@@ -257,10 +262,12 @@ export class SopWorkspaceService {
         }, runner)
         documentId = pubResult.documentId
         version = pubResult.version
+        changedDocumentId = documentId
       }
 
       if (action === 'archive' && documentId) {
         await this.repository.archiveDocument(documentId, row.BaseVersion, runner)
+        changedDocumentId = documentId
       }
 
       await this.repository.updateDraftStatus({
@@ -281,6 +288,16 @@ export class SopWorkspaceService {
         to: states[action]
       }, runner)
     })
+
+    if (changedDocumentId && this.indexingService) {
+      try {
+        if (action === 'publish') await this.indexingService.markPending(changedDocumentId, 'auto_publish')
+        if (action === 'archive') await this.indexingService.removeEntity(changedDocumentId)
+      } catch {
+        // Publishing is already committed. Index status can be reconciled from
+        // the administration screen without returning a misleading 500.
+      }
+    }
 
     return this.get(p, id)
   }

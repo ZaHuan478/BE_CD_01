@@ -15,6 +15,7 @@
     "db:migrate:prod": "node dist/database/migrate.js",
     "db:setup": "tsx src/database/setup.ts",
     "db:demo-governance": "tsx scripts/seed-demo-governance.ts",
+    "db:ensure-full-operator": "tsx scripts/ensure-demo-full-operator.ts",
     "db:knowledge:plan": "tsx src/database/knowledge-cli.ts",
     "db:knowledge:apply": "tsx src/database/knowledge-cli.ts --apply",
     "db:knowledge:verify": "tsx src/database/knowledge-cli.ts --verify",

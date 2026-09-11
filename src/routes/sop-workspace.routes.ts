@@ -5,6 +5,7 @@ import type { SopWorkspaceRepository } from '../repositories/sop-workspace.repos
 import { SopWorkspaceService } from '../services/sop-workspace.service.js'
 import { SopWorkspaceController } from '../controllers/sop-workspace.controller.js'
 import { createSopSchema } from '../schemas/sop.schemas.js'
+import type { IndexingService } from '../services/rag/indexing.service.js'
 
 const params = Type.Object({ id: Type.String({ minLength: 1, maxLength: 100 }) })
 const create = Type.Union([
@@ -32,8 +33,8 @@ const list = Type.Object({
   pageSize: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 }))
 }, { additionalProperties: false })
 
-export function sopWorkspaceRoutes(auth: AuthService, repository: SopWorkspaceRepository): FastifyPluginAsync {
-  const service = new SopWorkspaceService(repository)
+export function sopWorkspaceRoutes(auth: AuthService, repository: SopWorkspaceRepository, indexingService?: IndexingService): FastifyPluginAsync {
+  const service = new SopWorkspaceService(repository, indexingService)
   const controller = new SopWorkspaceController(auth, service)
 
   return async app => {

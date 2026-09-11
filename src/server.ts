@@ -9,6 +9,8 @@ import { ensureAdministrationSchema } from './database/administration-schema.js'
 import { ensureHruxSopLibrary } from './database/hrux-sop-library.js'
 import { ensureUserDocumentSchema } from './database/user-document-schema.js'
 import { ensureModuleNavigationSchema } from './database/module-navigation-schema.js'
+import { ensureRagSchema } from './database/rag-schema.js'
+import { ensureSopWorkspaceSchema } from './database/sop-workspace-schema.js'
 
 const env = loadEnv()
 const database = new Database(env)
@@ -36,6 +38,8 @@ try {
   await ensureAdministrationSchema(database)
   await ensureUserDocumentSchema(database)
   await ensureModuleNavigationSchema(database)
+  await ensureRagSchema(database)
+  await ensureSopWorkspaceSchema(database)
   if (env.databaseModel === 'core8') await ensureHruxSopLibrary(database)
   app.log.info(
     { database: env.database.name, databaseModel: env.databaseModel },

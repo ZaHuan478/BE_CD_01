@@ -38,6 +38,12 @@ import { administrationRoutes } from './routes/administration.routes.js'
 import { userDocumentRoutes } from './routes/user-document.routes.js'
 import { SopWorkspaceRepository } from './repositories/sop-workspace.repository.js'
 import { sopWorkspaceRoutes } from './routes/sop-workspace.routes.js'
+import { GeminiClient } from './services/rag/gemini.client.js'
+import { IndexingService } from './services/rag/indexing.service.js'
+import { RetrievalService } from './services/rag/retrieval.service.js'
+import { ChatService } from './services/chat/chat.service.js'
+import { ragRoutes } from './routes/rag.routes.js'
+import { chatRoutes } from './routes/chat.routes.js'
 
 export interface AppDependencies {
   env: AppEnv
@@ -147,6 +153,15 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
   await app.register(async (api) => {
     if (env.authMode === 'development') await api.register(authRoutes(authService))
     const moduleRepository = new ModuleRepository(database, core8)
+    const geminiClient = new GeminiClient({
+      apiKey: env.gemini?.apiKey,
+      embeddingModel: env.gemini?.embeddingModel,
+      embeddingDimension: env.gemini?.embeddingDimension,
+      chatModel: env.gemini?.chatModel
+    })
+    const indexingService = new IndexingService(database, geminiClient, core8, env.rag?.chunkMaxTokens ?? 500)
+    api.addHook('onListen', async () => { await indexingService.startWorker() })
+    api.addHook('onClose', async () => { indexingService.stopWorker() })
     await api.register(runtimeRoutes(authService, new RuntimeRepository(database, core8), moduleRepository,
       core8 ? new CoreDocumentRepository(database) : env.knowledgeReadSource === 'normalized' ? new KnowledgeReadRepository(database) : undefined))
     if (!core8) await api.register(bootstrapRoutes(authService, new BootstrapRepository(database), moduleRepository))
@@ -154,11 +169,11 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     await api.register(moduleRoutes(authService, moduleRepository))
     if (core8) {
       await api.register(core8Routes(authService, new Core8Repository(database), moduleRepository))
-      await api.register(sopImportRoutes(authService, database, undefined, moduleRepository, env))
+      await api.register(sopImportRoutes(authService, database, undefined, moduleRepository, env, indexingService))
     } else {
     const sopRepository = new SopRepository(database)
     await api.register(sopRoutes(authService, sopRepository, moduleRepository))
-    await api.register(sopImportRoutes(authService, database, sopRepository, moduleRepository, env))
+    await api.register(sopImportRoutes(authService, database, sopRepository, moduleRepository, env, indexingService))
     await api.register(searchRoutes(
       authService,
       new SearchService(new SearchRepository(database), moduleRepository)
@@ -168,7 +183,14 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     await api.register(accessRoutes(authService, new AccessRepository(database, core8), core8))
     await api.register(administrationRoutes(authService, database, core8))
     await api.register(userDocumentRoutes(authService, database, env))
-    await api.register(sopWorkspaceRoutes(authService, new SopWorkspaceRepository(database)))
+    // Khởi tạo các services cho AI RAG & Chatbot
+    await api.register(sopWorkspaceRoutes(authService, new SopWorkspaceRepository(database), indexingService))
+    const retrievalService = new RetrievalService(database, moduleRepository, geminiClient,
+      env.rag?.topK ?? 5, env.rag?.similarityThreshold ?? 0.65)
+    const chatService = new ChatService(database, retrievalService, geminiClient)
+
+    await api.register(ragRoutes(authService, indexingService))
+    await api.register(chatRoutes(authService, chatService))
   }, { prefix: '/api/v1' })
 
   return app

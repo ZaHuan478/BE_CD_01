@@ -9,7 +9,7 @@ const routeFiles = routeNames.map((file) => join(root, 'routes', file))
 describe('HTTP layer boundaries', () => {
   it('groups API areas into matching route, controller, service and repository folders', () => {
     expect(routeNames.map((file) => file.replace('.routes.ts', ''))).toEqual([
-      'access', 'administration', 'auth', 'bootstrap', 'core8', 'health', 'knowledge', 'me', 'module', 'runtime', 'search', 'sop-import', 'sop-workspace', 'sop', 'user-document'
+      'access', 'administration', 'auth', 'bootstrap', 'chat', 'core8', 'health', 'knowledge', 'me', 'module', 'rag', 'runtime', 'search', 'sop-import', 'sop-workspace', 'sop', 'user-document'
     ])
     for (const route of routeNames) {
       for (const [folder, suffix] of [['controllers', 'controller'], ['services', 'service'], ['repositories', 'repository']]) {
@@ -36,6 +36,7 @@ describe('runtime schema readiness', () => {
     expect(server).toContain('await ensureAdministrationSchema(database)')
     expect(server).toContain('await ensureUserDocumentSchema(database)')
     expect(server).toContain('await ensureModuleNavigationSchema(database)')
+    expect(server).toContain('await ensureRagSchema(database)')
     expect(server.indexOf('await ensureAdministrationSchema(database)')).toBeLessThan(listenPosition)
   })
 })

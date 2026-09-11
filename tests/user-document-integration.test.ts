@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { buildApp } from '../src/app.js'
 import type { AppEnv } from '../src/config/env.js'
 import type { DatabaseParameters, TransactionalDatabase } from '../src/database/database.js'
@@ -222,7 +224,7 @@ const mockEnv: AppEnv = {
   developmentDemoPassword: 'pass',
   cloudinary: { enabled: false, folder: 'hrm_documents' },
   upload: {
-    directory: 'data/uploads/sop-imports',
+    directory: join(tmpdir(), `hrm-sop-user-documents-${process.pid}`),
     maxBytes: 10 * 1024 * 1024
   },
   database: {

@@ -4,14 +4,16 @@ const defaultProfiles = [
   ['SOP_OWNER', 'Chủ sở hữu SOP', 'Chịu trách nhiệm nội dung và vòng đời của SOP'],
   ['SOP_EDITOR', 'Biên tập SOP', 'Soạn thảo và cập nhật nội dung SOP'],
   ['SOP_REVIEWER', 'Rà soát SOP', 'Kiểm tra nội dung và yêu cầu chỉnh sửa'],
-  ['SOP_APPROVER', 'Phê duyệt SOP', 'Phê duyệt và công bố SOP']
+  ['SOP_APPROVER', 'Phê duyệt SOP', 'Phê duyệt và công bố SOP'],
+  ['RAG_MANAGER', 'Quản trị chỉ mục AI', 'Theo dõi và đồng bộ chỉ mục phục vụ trợ lý SOP']
 ] as const
 
 const defaultCapabilities: Record<string, string[]> = {
   SOP_OWNER: ['sop.read', 'sop.create', 'sop.edit'],
   SOP_EDITOR: ['sop.read', 'sop.edit'],
   SOP_REVIEWER: ['sop.read', 'sop.review'],
-  SOP_APPROVER: ['sop.read', 'sop.publish']
+  SOP_APPROVER: ['sop.read', 'sop.publish'],
+  RAG_MANAGER: ['rag.manage']
 }
 
 /** Additive administration schema shared by legacy and core8 databases. */
