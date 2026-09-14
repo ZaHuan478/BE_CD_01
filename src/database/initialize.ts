@@ -14,8 +14,22 @@ import { ensureModuleNavigationSchema } from './module-navigation-schema.js'
 import { ensureCompleteModuleCatalog } from './complete-module-catalog.js'
 import { ensureSystemGuideSchema } from './system-guide-schema.js'
 import { ensureSystemGlossarySchema } from './system-glossary-schema.js'
+import { SqlServerDatabase } from './sqlserver.database.js'
+import { tableExists } from './core8-schema.js'
 
 export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promise<void> {
+  if (env.database.provider === 'sqlserver') {
+    const database = new SqlServerDatabase(env.database)
+    try {
+      await database.connect()
+      if (!await tableExists(database, 'SchemaMigration')) {
+        throw new Error('SQL Server schema is empty. Run npm run db:transfer:mysql-to-sqlserver before starting the backend.')
+      }
+    } finally {
+      await database.close()
+    }
+    return
+  }
   const pool = mysql.createPool({
     host: env.database.host, port: env.database.port, database: env.database.name,
     user: env.database.user, password: env.database.password,

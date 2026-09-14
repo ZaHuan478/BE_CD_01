@@ -1,5 +1,7 @@
 # HRM SOP API
 
+Backend hỗ trợ chọn MySQL hoặc SQL Server bằng `DB_PROVIDER`. Quy trình giữ MySQL, chuyển schema/data và chạy UAT song song được mô tả tại [docs/SQLSERVER_MIGRATION.md](docs/SQLSERVER_MIGRATION.md).
+
 Backend Node.js/TypeScript dạng **layered monolith**, gom file theo lớp kỹ thuật cho kho kiến thức SOP. API dùng Fastify, MySQL 8.4/InnoDB qua driver `mysql2`, validation bằng TypeBox và tài liệu OpenAPI tại `/docs`.
 
 Frontend chỉ gọi HTTP API; chỉ backend kết nối trực tiếp tới MySQL.

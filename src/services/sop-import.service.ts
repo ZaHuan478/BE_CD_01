@@ -470,11 +470,11 @@ export class SopImportService {
         }
       }
       if (!fallbackStorageKey) throw new AppError(404, 'MEDIA_NOT_FOUND', 'Không tìm thấy hình ảnh')
-      const buffer = await this.storage.readMedia(fallbackStorageKey)
-      return { buffer, mimeType: 'image/png' }
+      const file = await this.storage.readMedia(fallbackStorageKey)
+      return { buffer: file.buffer, mimeType: file.mimeType }
     }
-    const buffer = await this.storage.readMedia(media.storageKey)
-    return { buffer, mimeType: media.mimeType }
+    const file = await this.storage.readMedia(media.storageKey, media.mimeType)
+    return { buffer: file.buffer, mimeType: file.mimeType }
   }
 
   async updateMedia(principal: AuthPrincipal, id: string, mediaId: string, body: UpdateMediaBody) {

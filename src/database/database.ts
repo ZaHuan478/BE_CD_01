@@ -1,5 +1,6 @@
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader } from 'mysql2/promise'
-import type { AppEnv } from '../config/env.js'
+import type { AppEnv, DatabaseProvider } from '../config/env.js'
+import { SqlServerDatabase } from './sqlserver.database.js'
 
 export type DatabaseParameter = string | number | boolean | Date | Buffer | null
 export type DatabaseParameters = Record<string, DatabaseParameter>
@@ -8,11 +9,17 @@ export type SqlParameter = DatabaseParameter
 export type SqlParameters = DatabaseParameters
 
 export interface QueryRunner {
+  readonly provider?: DatabaseProvider
   query<T extends object>(statement: string, parameters?: DatabaseParameters): Promise<T[]>
 }
 
 export interface TransactionalDatabase extends QueryRunner {
   transaction<T>(operation: (runner: QueryRunner) => Promise<T>): Promise<T>
+}
+
+export interface ManagedDatabase extends TransactionalDatabase {
+  connect(): Promise<void>
+  close(): Promise<void>
 }
 
 function normalizeParameters(parameters: DatabaseParameters): DatabaseParameters {
@@ -32,7 +39,8 @@ async function execute<T extends object>(
   return [result as ResultSetHeader as T]
 }
 
-export class Database implements TransactionalDatabase {
+export class MySqlDatabase implements ManagedDatabase {
+  readonly provider = 'mysql' as const
   private readonly pool: Pool
 
   constructor(env: AppEnv) {
@@ -68,6 +76,7 @@ export class Database implements TransactionalDatabase {
   async transaction<T>(operation: (runner: QueryRunner) => Promise<T>): Promise<T> {
     const connection = await this.pool.getConnection()
     const runner: QueryRunner = {
+      provider: this.provider,
       query: <TRow extends object>(statement: string, parameters: DatabaseParameters = {}) =>
         execute<TRow>(connection, statement, parameters)
     }
@@ -82,5 +91,33 @@ export class Database implements TransactionalDatabase {
     } finally {
       connection.release()
     }
+  }
+}
+
+export class Database implements ManagedDatabase {
+  readonly provider: DatabaseProvider
+  private readonly implementation: ManagedDatabase
+
+  constructor(env: AppEnv) {
+    this.provider = env.database.provider ?? 'mysql'
+    this.implementation = this.provider === 'sqlserver'
+      ? new SqlServerDatabase(env.database)
+      : new MySqlDatabase(env)
+  }
+
+  connect(): Promise<void> {
+    return this.implementation.connect()
+  }
+
+  close(): Promise<void> {
+    return this.implementation.close()
+  }
+
+  query<T extends object>(statement: string, parameters: DatabaseParameters = {}): Promise<T[]> {
+    return this.implementation.query<T>(statement, parameters)
+  }
+
+  transaction<T>(operation: (runner: QueryRunner) => Promise<T>): Promise<T> {
+    return this.implementation.transaction(operation)
   }
 }

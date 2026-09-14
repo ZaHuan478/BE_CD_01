@@ -1,6 +1,23 @@
 import 'dotenv/config'
 
 export type AuthMode = 'development' | 'jwt'
+export type DatabaseProvider = 'mysql' | 'sqlserver'
+
+export interface DatabaseConfig {
+  provider?: DatabaseProvider
+  host: string
+  port: number
+  name: string
+  user: string
+  password: string
+  poolMax: number
+  initializeOnStart?: boolean
+  importSnapshot?: string
+  seedDemo?: boolean
+  encrypt?: boolean
+  trustServerCertificate?: boolean
+  requestTimeoutMs?: number
+}
 
 function numberValue(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -16,10 +33,36 @@ function boundedNumber(name: string, fallback: number, minimum: number, maximum:
   return value
 }
 
-function required(name: string): string {
-  const value = process.env[name]?.trim()
-  if (!value) throw new Error(`${name} is required`)
+function booleanValue(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase()
+  if (!raw) return fallback
+  if (raw === 'true' || raw === '1') return true
+  if (raw === 'false' || raw === '0') return false
+  throw new Error(`${name} must be true or false`)
+}
+
+function selectedDatabaseValue(provider: DatabaseProvider, suffix: string): string | undefined {
+  const prefix = provider === 'mysql' ? 'MYSQL' : 'SQLSERVER'
+  const legacySuffix = suffix === 'DATABASE' ? 'NAME' : suffix
+  return process.env[`${prefix}_${suffix}`]?.trim() || process.env[`DB_${legacySuffix}`]?.trim() || undefined
+}
+
+function selectedDatabaseRequired(provider: DatabaseProvider, suffix: string): string {
+  const value = selectedDatabaseValue(provider, suffix)
+  if (!value) {
+    const prefix = provider === 'mysql' ? 'MYSQL' : 'SQLSERVER'
+    const legacySuffix = suffix === 'DATABASE' ? 'NAME' : suffix
+    throw new Error(`${prefix}_${suffix} (or legacy DB_${legacySuffix}) is required`)
+  }
   return value
+}
+
+function selectedDatabaseNumber(provider: DatabaseProvider, suffix: string, fallback: number): number {
+  const raw = selectedDatabaseValue(provider, suffix)
+  if (!raw) return fallback
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed)) throw new Error(`${provider.toUpperCase()}_${suffix} must be a number`)
+  return parsed
 }
 
 export interface AppEnv {
@@ -57,17 +100,7 @@ export interface AppEnv {
     similarityThreshold: number
     chunkMaxTokens: number
   }
-  database: {
-    host: string
-    port: number
-    name: string
-    user: string
-    password: string
-    poolMax: number
-    initializeOnStart?: boolean
-    importSnapshot?: string
-    seedDemo?: boolean
-  }
+  database: DatabaseConfig
 }
 
 export function loadCloudinaryEnv(): AppEnv['cloudinary'] {
@@ -102,6 +135,10 @@ export function loadEnv(): AppEnv {
   const cloudinary = loadCloudinaryEnv()
   const databaseModel = process.env.DB_MODEL ?? 'legacy'
   if (databaseModel !== 'legacy' && databaseModel !== 'core8') throw new Error('DB_MODEL must be legacy or core8')
+  const databaseProvider = (process.env.DB_PROVIDER?.trim().toLowerCase() || 'mysql') as DatabaseProvider
+  if (databaseProvider !== 'mysql' && databaseProvider !== 'sqlserver') {
+    throw new Error('DB_PROVIDER must be mysql or sqlserver')
+  }
   const knowledgeReadSource = process.env.KNOWLEDGE_READ_SOURCE ?? 'legacy'
   if (knowledgeReadSource !== 'legacy' && knowledgeReadSource !== 'normalized') throw new Error('KNOWLEDGE_READ_SOURCE must be legacy or normalized')
   const authMode = (process.env.AUTH_MODE ?? 'development') as AuthMode
@@ -155,15 +192,22 @@ export function loadEnv(): AppEnv {
       chunkMaxTokens: boundedNumber('RAG_CHUNK_MAX_TOKENS', 500, 100, 2000)
     },
     database: {
-      host: required('DB_HOST'),
-      port: numberValue('DB_PORT', 3306),
-      name: required('DB_NAME'),
-      user: required('DB_USER'),
-      password: required('DB_PASSWORD'),
-      poolMax: numberValue('DB_POOL_MAX', 10),
-      initializeOnStart: (process.env.DB_INITIALIZE_ON_START ?? (process.env.NODE_ENV === 'production' ? 'false' : 'true')) === 'true',
+      provider: databaseProvider,
+      host: selectedDatabaseRequired(databaseProvider, 'HOST'),
+      port: selectedDatabaseNumber(databaseProvider, 'PORT', databaseProvider === 'mysql' ? 3306 : 1433),
+      name: selectedDatabaseRequired(databaseProvider, 'DATABASE'),
+      user: selectedDatabaseRequired(databaseProvider, 'USER'),
+      password: selectedDatabaseRequired(databaseProvider, 'PASSWORD'),
+      poolMax: selectedDatabaseNumber(databaseProvider, 'POOL_MAX', 10),
+      initializeOnStart: booleanValue(
+        'DB_INITIALIZE_ON_START',
+        process.env.NODE_ENV !== 'production' && databaseProvider === 'mysql'
+      ),
       importSnapshot: process.env.DB_IMPORT_SNAPSHOT ?? (process.env.NODE_ENV === 'production' ? '' : 'data/import/legacy-snapshot.json'),
-      seedDemo: process.env.DB_SEED_DEMO === 'true'
+      seedDemo: process.env.DB_SEED_DEMO === 'true',
+      encrypt: booleanValue('SQLSERVER_ENCRYPT', true),
+      trustServerCertificate: booleanValue('SQLSERVER_TRUST_SERVER_CERTIFICATE', process.env.NODE_ENV !== 'production'),
+      requestTimeoutMs: numberValue('SQLSERVER_REQUEST_TIMEOUT_MS', 30_000)
     }
   }
 }

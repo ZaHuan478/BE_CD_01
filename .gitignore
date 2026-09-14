@@ -4,6 +4,7 @@ dist/
 .env.*
 !.env.example
 coverage/
+Backups/
 *.log
 data/import/
 data/uploads/

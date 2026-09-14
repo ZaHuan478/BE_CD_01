@@ -14,6 +14,9 @@
     "db:migrate": "tsx src/database/migrate.ts",
     "db:migrate:prod": "node dist/database/migrate.js",
     "db:setup": "tsx src/database/setup.ts",
+    "db:transfer:mysql-to-sqlserver": "tsx src/database/sqlserver-transfer-cli.ts",
+    "db:transfer:mysql-to-sqlserver:prod": "node dist/database/sqlserver-transfer-cli.js",
+    "db:backup:sqlserver": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/backup-sqlserver.ps1",
     "db:demo-governance": "tsx scripts/seed-demo-governance.ts",
     "db:ensure-full-operator": "tsx scripts/ensure-demo-full-operator.ts",
     "db:document-conversions:reprocess": "tsx scripts/reprocess-document-conversions.ts",
@@ -44,11 +47,13 @@
     "fastify": "^5.12.1",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.2",
+    "mssql": "^12.7.2",
     "mysql2": "^3.24.3",
     "pdf-parse": "^2.4.5",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@types/mssql": "^12.3.0",
     "@types/node": "^26.5.0",
     "oxlint": "^1.81.0",
     "tsx": "^4.23.13",

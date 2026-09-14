@@ -55,8 +55,10 @@ export interface AppDependencies {
 }
 
 function databaseErrorNumber(error: unknown): number | undefined {
-  if (typeof error !== 'object' || error === null || !('errno' in error)) return undefined
-  return typeof error.errno === 'number' ? error.errno : undefined
+  if (typeof error !== 'object' || error === null) return undefined
+  const candidate = error as { errno?: unknown; number?: unknown; originalError?: { info?: { number?: unknown } } }
+  const value = candidate.errno ?? candidate.number ?? candidate.originalError?.info?.number
+  return typeof value === 'number' ? value : undefined
 }
 
 export async function buildApp({ env, database }: AppDependencies): Promise<FastifyInstance> {
@@ -87,7 +89,7 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     openapi: {
       info: {
         title: 'HRM SOP API',
-        description: 'Versioned SOP knowledge API backed by MySQL',
+        description: 'Versioned SOP knowledge API backed by MySQL or SQL Server',
         version: '0.1.0'
       },
       components: {
@@ -129,14 +131,14 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
       })
       return
     }
-    if (databaseErrorNumber(error) === 1062) {
+    if ([1062, 2601, 2627].includes(databaseErrorNumber(error) ?? 0)) {
       void reply.code(409).send({
         error: { code: 'UNIQUE_CONSTRAINT', message: 'A record with the same unique value already exists' },
         requestId: request.id
       })
       return
     }
-    if ([1451, 1452].includes(databaseErrorNumber(error) ?? 0)) {
+    if ([547, 1451, 1452].includes(databaseErrorNumber(error) ?? 0)) {
       void reply.code(409).send({
         error: { code: 'REFERENCE_CONSTRAINT', message: 'The operation references missing or in-use data' },
         requestId: request.id

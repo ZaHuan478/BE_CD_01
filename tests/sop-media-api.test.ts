@@ -141,7 +141,10 @@ describe('sop-media-api', () => {
   } as unknown as SopImportRepository
 
   const mockStorage = {
-    readMedia: async (_key: string) => Buffer.from('FAKE_IMAGE_DATA'),
+    readMedia: async (_key: string) => ({
+      buffer: Buffer.from('FAKE_IMAGE_DATA'),
+      mimeType: 'image/png'
+    }),
     putMedia: async () => ({ storageKey: 'local:media/import-123/crop-1.png', previewUrl: '/api/v1/sop-imports/import-123/media/crop-1/preview' }),
     removeMedia: async () => {}
   }

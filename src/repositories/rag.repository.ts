@@ -117,28 +117,43 @@ export class RagRepository {
       embeddingModel: chunk.embeddingModel ?? null
     }
 
-    await this.database.query(`
-        INSERT INTO RagChunk (
+    if (this.database.provider === 'sqlserver') {
+      await this.database.query(`MERGE RagChunk WITH (HOLDLOCK) AS target
+        USING (SELECT :chunkId AS RagChunkId) AS source ON target.RagChunkId = source.RagChunkId
+        WHEN MATCHED THEN UPDATE SET
+          Title = :title, ModuleId = :moduleId, ModuleIdsJson = :moduleIdsJson,
+          IsCommon = :isCommon, Content = :content, ContentHash = :contentHash,
+          MetadataJson = :metadataJson,
+          EmbeddingJson = COALESCE(:embeddingStr, target.EmbeddingJson),
+          EmbeddingModel = COALESCE(:embeddingModel, target.EmbeddingModel),
+          PublishedAt = SYSUTCDATETIME()
+        WHEN NOT MATCHED THEN INSERT (
           RagChunkId, SopId, SopVersionId, SopStepId, ModuleId, ModuleIdsJson, IsCommon,
-          ChunkType, ChunkIndex, Title, Content, ContentHash, MetadataJson,
-          EmbeddingJson, EmbeddingModel
+          ChunkType, ChunkIndex, Title, Content, ContentHash, MetadataJson, EmbeddingJson, EmbeddingModel
         ) VALUES (
           :chunkId, :sopId, :sopVersionId, :sopStepId, :moduleId, :moduleIdsJson, :isCommon,
-          :chunkType, :chunkIndex, :title, :content, :contentHash, :metadataJson,
-          :embeddingStr, :embeddingModel
-        )
-        ON DUPLICATE KEY UPDATE
-          Title = VALUES(Title),
-          ModuleId = VALUES(ModuleId),
-          ModuleIdsJson = VALUES(ModuleIdsJson),
-          IsCommon = VALUES(IsCommon),
-          Content = VALUES(Content),
-          ContentHash = VALUES(ContentHash),
-          MetadataJson = VALUES(MetadataJson),
-          EmbeddingJson = COALESCE(VALUES(EmbeddingJson), EmbeddingJson),
-          EmbeddingModel = COALESCE(VALUES(EmbeddingModel), EmbeddingModel),
-          PublishedAt = CURRENT_TIMESTAMP(3)
-      `, baseParams)
+          :chunkType, :chunkIndex, :title, :content, :contentHash, :metadataJson, :embeddingStr, :embeddingModel
+        );`, baseParams)
+    } else {
+      await this.database.query(`
+          INSERT INTO RagChunk (
+            RagChunkId, SopId, SopVersionId, SopStepId, ModuleId, ModuleIdsJson, IsCommon,
+            ChunkType, ChunkIndex, Title, Content, ContentHash, MetadataJson,
+            EmbeddingJson, EmbeddingModel
+          ) VALUES (
+            :chunkId, :sopId, :sopVersionId, :sopStepId, :moduleId, :moduleIdsJson, :isCommon,
+            :chunkType, :chunkIndex, :title, :content, :contentHash, :metadataJson,
+            :embeddingStr, :embeddingModel
+          )
+          ON DUPLICATE KEY UPDATE
+            Title = VALUES(Title), ModuleId = VALUES(ModuleId), ModuleIdsJson = VALUES(ModuleIdsJson),
+            IsCommon = VALUES(IsCommon), Content = VALUES(Content), ContentHash = VALUES(ContentHash),
+            MetadataJson = VALUES(MetadataJson),
+            EmbeddingJson = COALESCE(VALUES(EmbeddingJson), EmbeddingJson),
+            EmbeddingModel = COALESCE(VALUES(EmbeddingModel), EmbeddingModel),
+            PublishedAt = CURRENT_TIMESTAMP(3)
+        `, baseParams)
+    }
   }
 
   async deleteChunksByEntity(sopId: string): Promise<void> {
@@ -183,25 +198,7 @@ export class RagRepository {
         WHERE EntityId = :entityId AND VersionId <> :versionId AND IndexStatus <> 'stale'
       `, { entityId: state.entityId, versionId: state.versionId })
     }
-    await this.database.query(`
-      INSERT INTO IndexDocumentState (
-        EntityId, EntityType, VersionId, Title, ModuleId, IndexStatus,
-        TotalChunks, IndexedChunks, ErrorMessage, TriggerSource, LastIndexedAt
-      ) VALUES (
-        :entityId, :entityType, :versionId, :title, :moduleId, :indexStatus,
-        :totalChunks, :indexedChunks, :errorMessage, :triggerSource,
-        IF(:indexStatus = 'synced', CURRENT_TIMESTAMP(3), NULL)
-      )
-      ON DUPLICATE KEY UPDATE
-        Title = VALUES(Title),
-        ModuleId = VALUES(ModuleId),
-        IndexStatus = VALUES(IndexStatus),
-        TotalChunks = VALUES(TotalChunks),
-        IndexedChunks = VALUES(IndexedChunks),
-        ErrorMessage = VALUES(ErrorMessage),
-        TriggerSource = VALUES(TriggerSource),
-        LastIndexedAt = IF(VALUES(IndexStatus) = 'synced', CURRENT_TIMESTAMP(3), LastIndexedAt)
-    `, {
+    const parameters = {
       entityId: state.entityId,
       entityType: state.entityType,
       versionId: state.versionId,
@@ -212,7 +209,41 @@ export class RagRepository {
       indexedChunks: state.indexedChunks,
       errorMessage: state.errorMessage || null,
       triggerSource: state.triggerSource
-    })
+    }
+    if (this.database.provider === 'sqlserver') {
+      await this.database.query(`MERGE IndexDocumentState WITH (HOLDLOCK) AS target
+        USING (SELECT :entityId AS EntityId, :versionId AS VersionId) AS source
+          ON target.EntityId = source.EntityId AND target.VersionId = source.VersionId
+        WHEN MATCHED THEN UPDATE SET
+          Title = :title, ModuleId = :moduleId, IndexStatus = :indexStatus,
+          TotalChunks = :totalChunks, IndexedChunks = :indexedChunks,
+          ErrorMessage = :errorMessage, TriggerSource = :triggerSource,
+          LastIndexedAt = CASE WHEN :indexStatus = 'synced' THEN SYSUTCDATETIME() ELSE target.LastIndexedAt END
+        WHEN NOT MATCHED THEN INSERT (
+          EntityId, EntityType, VersionId, Title, ModuleId, IndexStatus,
+          TotalChunks, IndexedChunks, ErrorMessage, TriggerSource, LastIndexedAt
+        ) VALUES (
+          :entityId, :entityType, :versionId, :title, :moduleId, :indexStatus,
+          :totalChunks, :indexedChunks, :errorMessage, :triggerSource,
+          CASE WHEN :indexStatus = 'synced' THEN SYSUTCDATETIME() ELSE NULL END
+        );`, parameters)
+    } else {
+      await this.database.query(`
+        INSERT INTO IndexDocumentState (
+          EntityId, EntityType, VersionId, Title, ModuleId, IndexStatus,
+          TotalChunks, IndexedChunks, ErrorMessage, TriggerSource, LastIndexedAt
+        ) VALUES (
+          :entityId, :entityType, :versionId, :title, :moduleId, :indexStatus,
+          :totalChunks, :indexedChunks, :errorMessage, :triggerSource,
+          IF(:indexStatus = 'synced', CURRENT_TIMESTAMP(3), NULL)
+        )
+        ON DUPLICATE KEY UPDATE
+          Title = VALUES(Title), ModuleId = VALUES(ModuleId), IndexStatus = VALUES(IndexStatus),
+          TotalChunks = VALUES(TotalChunks), IndexedChunks = VALUES(IndexedChunks),
+          ErrorMessage = VALUES(ErrorMessage), TriggerSource = VALUES(TriggerSource),
+          LastIndexedAt = IF(VALUES(IndexStatus) = 'synced', CURRENT_TIMESTAMP(3), LastIndexedAt)
+      `, parameters)
+    }
   }
 
   async getIndexOverview(): Promise<{

@@ -32,24 +32,34 @@ process.once('SIGTERM', () => { void shutdown('SIGTERM') })
 try {
   if (env.database.initializeOnStart) await initializeDatabase(env)
   await database.connect()
+  if (!await tableExists(database, 'SchemaMigration')) {
+    const instruction = env.database.provider === 'sqlserver'
+      ? 'Run npm run db:transfer:mysql-to-sqlserver first.'
+      : 'Run npm run db:setup first.'
+    throw new Error(`Database schema is not initialized. ${instruction}`)
+  }
   if (env.databaseModel === 'core8') await assertCore8Ready(database)
-  else if (await tableExists(database, 'SchemaMigration')) {
+  else {
     const marker = await database.query('SELECT MigrationId FROM SchemaMigration WHERE MigrationId = :id', { id: core8Marker })
     if (marker.length) throw new Error('This database uses core8. Set DB_MODEL=core8 before starting the backend.')
   }
-  await ensureSopImportSchema(database)
-  await ensureAdministrationSchema(database)
-  await ensureUserDocumentSchema(database)
-  await ensureModuleNavigationSchema(database)
-  await ensureCompleteModuleCatalog(database)
-  await ensureRagSchema(database)
-  await ensureCompleteModuleRagScopes(database)
-  await ensureSopWorkspaceSchema(database)
-  await ensureSystemGuideSchema(database)
-  await ensureSystemGlossarySchema(database)
-  if (env.databaseModel === 'core8') await ensureHruxSopLibrary(database)
+  // Runtime schema helpers currently contain MySQL DDL. SQL Server receives the
+  // equivalent schema from the explicit transfer command and must never run them.
+  if (env.database.provider !== 'sqlserver') {
+    await ensureSopImportSchema(database)
+    await ensureAdministrationSchema(database)
+    await ensureUserDocumentSchema(database)
+    await ensureModuleNavigationSchema(database)
+    await ensureCompleteModuleCatalog(database)
+    await ensureRagSchema(database)
+    await ensureCompleteModuleRagScopes(database)
+    await ensureSopWorkspaceSchema(database)
+    await ensureSystemGuideSchema(database)
+    await ensureSystemGlossarySchema(database)
+    if (env.databaseModel === 'core8') await ensureHruxSopLibrary(database)
+  }
   app.log.info(
-    { database: env.database.name, databaseModel: env.databaseModel },
+    { database: env.database.name, databaseModel: env.databaseModel, databaseProvider: database.provider },
     'Connect database successfully'
   )
   await app.listen({ host: env.host, port: env.port })

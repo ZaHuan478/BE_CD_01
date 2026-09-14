@@ -65,10 +65,20 @@ export class AdministrationRepository {
   async updateSettings(settings: SystemSettings, actorAccountId: string) {
     const before = await this.getSettings()
     await this.database.transaction(async runner => {
-      await runner.query(`INSERT INTO AppConfig (ConfigKey, ScopeType, ScopeId, ValueJson, IsActive, UpdatedBy)
-        VALUES ('sop.management', 'system', '*', :value, TRUE, :actor)
-        ON DUPLICATE KEY UPDATE ValueJson = :value, IsActive = TRUE, UpdatedBy = :actor,
-          UpdatedAt = UTC_TIMESTAMP(3), RowVersion = RowVersion + 1`, { value: JSON.stringify(settings), actor: actorAccountId })
+      const parameters = { value: JSON.stringify(settings), actor: actorAccountId }
+      if (runner.provider === 'sqlserver') {
+        await runner.query(`MERGE AppConfig WITH (HOLDLOCK) AS target
+          USING (SELECT 'sop.management' AS ConfigKey) AS source ON target.ConfigKey = source.ConfigKey
+          WHEN MATCHED THEN UPDATE SET ValueJson = :value, IsActive = 1, UpdatedBy = :actor,
+            UpdatedAt = SYSUTCDATETIME(), RowVersion = RowVersion + 1
+          WHEN NOT MATCHED THEN INSERT (ConfigKey, ScopeType, ScopeId, ValueJson, IsActive, UpdatedBy)
+            VALUES ('sop.management', 'system', '*', :value, 1, :actor);`, parameters)
+      } else {
+        await runner.query(`INSERT INTO AppConfig (ConfigKey, ScopeType, ScopeId, ValueJson, IsActive, UpdatedBy)
+          VALUES ('sop.management', 'system', '*', :value, TRUE, :actor)
+          ON DUPLICATE KEY UPDATE ValueJson = :value, IsActive = TRUE, UpdatedBy = :actor,
+            UpdatedAt = UTC_TIMESTAMP(3), RowVersion = RowVersion + 1`, parameters)
+      }
       await runner.query(`INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, BeforeJson, AfterJson)
         VALUES ('app-config', 'sop.management', 'update-settings', :actor, :before, :after)`, {
         actor: actorAccountId, before: JSON.stringify(before), after: JSON.stringify(settings)

@@ -88,19 +88,35 @@ export class SystemGuideRepository {
   }
 
   async saveProgress(accountId: string, guideId: string, body: SystemGuideProgressBody) {
-    await this.database.query(`INSERT INTO UserGuideProgress
-      (AccountId, GuideId, CompletedStepsJson, TourCompleted, DismissedAt, LastViewedAt, CompletedAt)
-      SELECT :accountId, GuideId, :steps, :tourCompleted,
-        CASE WHEN :dismissed = 1 THEN CURRENT_TIMESTAMP(3) ELSE NULL END,
-        CURRENT_TIMESTAMP(3),
-        CASE WHEN :tourCompleted = 1 THEN CURRENT_TIMESTAMP(3) ELSE NULL END
-      FROM SystemGuide WHERE GuideId = :guideId
-      ON DUPLICATE KEY UPDATE CompletedStepsJson = :steps, TourCompleted = :tourCompleted,
-        DismissedAt = CASE WHEN :dismissed = 1 THEN COALESCE(DismissedAt, CURRENT_TIMESTAMP(3)) ELSE NULL END,
-        LastViewedAt = CURRENT_TIMESTAMP(3),
-        CompletedAt = CASE WHEN :tourCompleted = 1 THEN COALESCE(CompletedAt, CURRENT_TIMESTAMP(3)) ELSE NULL END`, {
+    const parameters = {
       accountId, guideId, steps: JSON.stringify(body.completedSteps), tourCompleted: body.tourCompleted, dismissed: body.dismissed
-    })
+    }
+    if (this.database.provider === 'sqlserver') {
+      await this.database.query(`MERGE UserGuideProgress WITH (HOLDLOCK) AS target
+        USING (SELECT :accountId AS AccountId, GuideId FROM SystemGuide WHERE GuideId = :guideId) AS source
+          ON target.AccountId = source.AccountId AND target.GuideId = source.GuideId
+        WHEN MATCHED THEN UPDATE SET CompletedStepsJson = :steps, TourCompleted = :tourCompleted,
+          DismissedAt = CASE WHEN :dismissed = 1 THEN COALESCE(target.DismissedAt, SYSUTCDATETIME()) ELSE NULL END,
+          LastViewedAt = SYSUTCDATETIME(),
+          CompletedAt = CASE WHEN :tourCompleted = 1 THEN COALESCE(target.CompletedAt, SYSUTCDATETIME()) ELSE NULL END
+        WHEN NOT MATCHED THEN INSERT
+          (AccountId, GuideId, CompletedStepsJson, TourCompleted, DismissedAt, LastViewedAt, CompletedAt)
+          VALUES (source.AccountId, source.GuideId, :steps, :tourCompleted,
+            CASE WHEN :dismissed = 1 THEN SYSUTCDATETIME() ELSE NULL END,
+            SYSUTCDATETIME(), CASE WHEN :tourCompleted = 1 THEN SYSUTCDATETIME() ELSE NULL END);`, parameters)
+    } else {
+      await this.database.query(`INSERT INTO UserGuideProgress
+        (AccountId, GuideId, CompletedStepsJson, TourCompleted, DismissedAt, LastViewedAt, CompletedAt)
+        SELECT :accountId, GuideId, :steps, :tourCompleted,
+          CASE WHEN :dismissed = 1 THEN CURRENT_TIMESTAMP(3) ELSE NULL END,
+          CURRENT_TIMESTAMP(3),
+          CASE WHEN :tourCompleted = 1 THEN CURRENT_TIMESTAMP(3) ELSE NULL END
+        FROM SystemGuide WHERE GuideId = :guideId
+        ON DUPLICATE KEY UPDATE CompletedStepsJson = :steps, TourCompleted = :tourCompleted,
+          DismissedAt = CASE WHEN :dismissed = 1 THEN COALESCE(DismissedAt, CURRENT_TIMESTAMP(3)) ELSE NULL END,
+          LastViewedAt = CURRENT_TIMESTAMP(3),
+          CompletedAt = CASE WHEN :tourCompleted = 1 THEN COALESCE(CompletedAt, CURRENT_TIMESTAMP(3)) ELSE NULL END`, parameters)
+    }
     const [row] = await this.database.query<ProgressRow>(`SELECT GuideId, CompletedStepsJson, TourCompleted, DismissedAt, LastViewedAt, CompletedAt
       FROM UserGuideProgress WHERE AccountId = :accountId AND GuideId = :guideId`, { accountId, guideId })
     return row

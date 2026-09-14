@@ -6,6 +6,11 @@ export const legacyTables = ['RagChunk', 'DocumentLink', 'SopRelation', 'StepArt
 export const core8Marker = 'core8:verified'
 
 export async function tableExists(database: QueryRunner, table: string): Promise<boolean> {
+  if (database.provider === 'sqlserver') {
+    const rows = await database.query<{ Name: string }>(`SELECT TABLE_NAME AS Name FROM information_schema.TABLES
+      WHERE TABLE_CATALOG = DB_NAME() AND LOWER(TABLE_NAME) = LOWER(:table)`, { table })
+    return rows.length > 0
+  }
   const rows = await database.query<{ Name: string }>(`SELECT TABLE_NAME AS Name FROM information_schema.TABLES
     WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = LOWER(:table)`, { table })
   return rows.length > 0

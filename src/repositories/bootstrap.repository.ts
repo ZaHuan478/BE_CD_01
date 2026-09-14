@@ -148,12 +148,21 @@ export class BootstrapRepository {
       return { acknowledged: false, acknowledgedAt: null }
     }
 
-    await this.database.query(`
-      INSERT INTO PolicyAcknowledgement (AccountId, PolicyId, AcknowledgedAt, UpdatedAt)
-      VALUES (:accountId, :policyId, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
-      ON DUPLICATE KEY UPDATE
-        AcknowledgedAt = UTC_TIMESTAMP(3), UpdatedAt = UTC_TIMESTAMP(3)
-    `, { accountId, policyId })
+    if (this.database.provider === 'sqlserver') {
+      await this.database.query(`MERGE PolicyAcknowledgement WITH (HOLDLOCK) AS target
+        USING (SELECT :accountId AS AccountId, :policyId AS PolicyId) AS source
+          ON target.AccountId = source.AccountId AND target.PolicyId = source.PolicyId
+        WHEN MATCHED THEN UPDATE SET AcknowledgedAt = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME()
+        WHEN NOT MATCHED THEN INSERT (AccountId, PolicyId, AcknowledgedAt, UpdatedAt)
+          VALUES (:accountId, :policyId, SYSUTCDATETIME(), SYSUTCDATETIME());`, { accountId, policyId })
+    } else {
+      await this.database.query(`
+        INSERT INTO PolicyAcknowledgement (AccountId, PolicyId, AcknowledgedAt, UpdatedAt)
+        VALUES (:accountId, :policyId, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+        ON DUPLICATE KEY UPDATE
+          AcknowledgedAt = UTC_TIMESTAMP(3), UpdatedAt = UTC_TIMESTAMP(3)
+      `, { accountId, policyId })
+    }
     const [row] = await this.database.query<AcknowledgementRow>(`
       SELECT AcknowledgedAt FROM PolicyAcknowledgement
       WHERE AccountId = :accountId AND PolicyId = :policyId
