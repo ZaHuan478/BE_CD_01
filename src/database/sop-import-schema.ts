@@ -23,7 +23,7 @@ export async function ensureSopImportSchema(database: QueryRunner): Promise<void
     CreatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     UpdatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     AcceptedAt DATETIME(3) NULL,
-    UNIQUE KEY UQ_SopImportJob_StorageKey (StorageKey),
+    KEY IX_SopImportJob_StorageKey (StorageKey),
     KEY IX_SopImportJob_Creator (CreatedBy, CreatedAt DESC),
     KEY IX_SopImportJob_Checksum (Checksum, CreatedBy),
     KEY IX_SopImportJob_SourceDocument (SourceDocumentId),
@@ -46,6 +46,18 @@ export async function ensureSopImportSchema(database: QueryRunner): Promise<void
   }
   await database.query("ALTER TABLE SopImportJob MODIFY Status ENUM('needs_review', 'accepted', 'published', 'failed', 'archived') NOT NULL DEFAULT 'needs_review'")
   await database.query("ALTER TABLE SopImportJob MODIFY AudienceMode ENUM('personal', 'department', 'job_title', 'department_job_title', 'module') NOT NULL DEFAULT 'personal'")
+  const uniqueStorageIndexes = await database.query(`SELECT INDEX_NAME FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'sopimportjob'
+      AND INDEX_NAME = 'UQ_SopImportJob_StorageKey'`)
+  if (uniqueStorageIndexes.length) {
+    await database.query('ALTER TABLE SopImportJob DROP INDEX UQ_SopImportJob_StorageKey')
+  }
+  const storageIndexes = await database.query(`SELECT INDEX_NAME FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'sopimportjob'
+      AND INDEX_NAME = 'IX_SopImportJob_StorageKey'`)
+  if (!storageIndexes.length) {
+    await database.query('CREATE INDEX IX_SopImportJob_StorageKey ON SopImportJob (StorageKey)')
+  }
   const sourceIndexes = await database.query(`SELECT INDEX_NAME FROM information_schema.STATISTICS
     WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'sopimportjob'
       AND INDEX_NAME = 'IX_SopImportJob_SourceDocument'`)

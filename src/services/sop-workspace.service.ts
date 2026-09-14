@@ -80,6 +80,7 @@ export function workspacePreview(doc: { Code: string; Title: string; Summary: st
     moduleIds,
     primaryModuleId: moduleIds.includes(content.primaryModuleId) ? content.primaryModuleId : moduleIds[0]!,
     changeLog: '',
+    ...(content.sourceStructure ? { sourceStructure: content.sourceStructure } : {}),
     steps,
     transitions: Array.isArray(content.transitions) && content.transitions.length ? content.transitions :
       steps.slice(1).map((step: { id: string }, i: number) => ({ fromStepId: steps[i]!.id, toStepId: step.id, kind: 'normal', sortOrder: i + 1 }))

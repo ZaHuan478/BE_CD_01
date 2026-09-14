@@ -3,6 +3,17 @@ import { SopExtractor } from '../src/services/rag/sop-extractor.js'
 import { CitationParser } from '../src/services/chat/citation.parser.js'
 import { PromptBuilder } from '../src/services/chat/prompt.builder.js'
 import { splitSemanticChunks } from '../src/services/rag/semantic-chunker.js'
+import { RagRepository } from '../src/repositories/rag.repository.js'
+import type { DatabaseParameters, QueryRunner } from '../src/database/database.js'
+
+class CapturingRagDatabase implements QueryRunner {
+  statements: string[] = []
+
+  async query<T extends object>(statement: string, _parameters: DatabaseParameters = {}): Promise<T[]> {
+    this.statements.push(statement)
+    return []
+  }
+}
 
 describe('RAG Extractor & Pipeline Tests', () => {
   const extractor = new SopExtractor()
@@ -136,5 +147,21 @@ describe('RAG Extractor & Pipeline Tests', () => {
     expect(parts.every(chunk => chunk.sopId === 'doc-long' && chunk.sopVersionId === 'v2')).toBe(true)
     expect(new Set(parts.map(chunk => chunk.chunkId)).size).toBe(parts.length)
     expect(parts.every(chunk => chunk.content.length <= 400)).toBe(true)
+  })
+
+  it('excludes stale document versions from keyword and vector retrieval', async () => {
+    const database = new CapturingRagDatabase()
+    const repository = new RagRepository(database)
+
+    await repository.searchByKeyword('hợp đồng', ['emp'])
+    await repository.searchByVector([0.1, 0.2], ['emp'])
+
+    const searchStatements = database.statements.filter(statement => statement.includes('FROM RagChunk'))
+    expect(searchStatements).toHaveLength(2)
+    for (const statement of searchStatements) {
+      expect(statement).toContain('IndexDocumentState state')
+      expect(statement).toContain("state.IndexStatus = 'stale'")
+      expect(statement).toContain('state.VersionId = RagChunk.SopVersionId')
+    }
   })
 })

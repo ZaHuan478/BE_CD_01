@@ -1,6 +1,6 @@
 import { type Static } from '@sinclair/typebox'
 import { Type } from '@sinclair/typebox'
-import { createSopSchema } from './sop.schemas.js'
+import { createSopSchema, stepMediaRoleSchema } from './sop.schemas.js'
 
 export const sopImportParamsSchema = Type.Object({
   importId: Type.String({ minLength: 1, maxLength: 100 })
@@ -23,9 +23,39 @@ export const createDocumentConversionSchema = Type.Object({
   ]))
 }, { additionalProperties: false })
 
+export const mediaParamsSchema = Type.Object({
+  importId: Type.String({ minLength: 1, maxLength: 100 }),
+  mediaId: Type.String({ minLength: 1, maxLength: 100 })
+})
+
+export const updateMediaBodySchema = Type.Object({
+  targetStepStableKey: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 100 }), Type.Null()])),
+  caption: Type.Optional(Type.Union([Type.String({ maxLength: 1000 }), Type.Null()])),
+  role: Type.Optional(stepMediaRoleSchema),
+  sortOrder: Type.Optional(Type.Integer()),
+  isIgnored: Type.Optional(Type.Boolean()),
+  setAsCover: Type.Optional(Type.Boolean())
+}, { additionalProperties: false })
+
+export const cropMediaBodySchema = Type.Object({
+  page: Type.Integer({ minimum: 1 }),
+  boundingBox: Type.Object({
+    x: Type.Number({ minimum: 0 }),
+    y: Type.Number({ minimum: 0 }),
+    width: Type.Number({ minimum: 1 }),
+    height: Type.Number({ minimum: 1 })
+  }, { additionalProperties: false }),
+  targetStepStableKey: Type.String({ minLength: 1, maxLength: 100 }),
+  caption: Type.Optional(Type.String({ maxLength: 1000 })),
+  role: Type.Optional(stepMediaRoleSchema),
+  imageDataUrl: Type.Optional(Type.String({ maxLength: 20_000_000 }))
+}, { additionalProperties: false })
+
 export type ReviewSopImportBody = Static<typeof reviewSopImportSchema>
 export type UpdateSopImportBody = Static<typeof updateSopImportSchema>
 export type CreateDocumentConversionBody = Static<typeof createDocumentConversionSchema>
+export type UpdateMediaBody = Static<typeof updateMediaBodySchema>
+export type CropMediaBody = Static<typeof cropMediaBodySchema>
 
 export interface SopImportUpload {
   fileName: string

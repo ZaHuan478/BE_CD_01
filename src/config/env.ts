@@ -46,13 +46,13 @@ export interface AppEnv {
     folder: string
     enabled: boolean
   }
-  gemini: {
+  gemini?: {
     apiKey?: string
     embeddingModel: string
     embeddingDimension: number
     chatModel: string
   }
-  rag: {
+  rag?: {
     topK: number
     similarityThreshold: number
     chunkMaxTokens: number

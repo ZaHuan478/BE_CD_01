@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS SopImportJob (
   CreatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   UpdatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   AcceptedAt DATETIME(3) NULL,
-  UNIQUE KEY UQ_SopImportJob_StorageKey (StorageKey),
+  KEY IX_SopImportJob_StorageKey (StorageKey),
   KEY IX_SopImportJob_Creator (CreatedBy, CreatedAt DESC),
   KEY IX_SopImportJob_Checksum (Checksum, CreatedBy),
   CONSTRAINT CK_SopImportJob_PreviewJson CHECK (JSON_VALID(PreviewJson)),

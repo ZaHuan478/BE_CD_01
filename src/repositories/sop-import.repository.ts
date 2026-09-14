@@ -57,6 +57,20 @@ function mapRow(row: ImportRow) {
   }
 }
 
+const activeSourceCondition = `(job.SourceDocumentId IS NULL OR EXISTS (
+  SELECT 1 FROM UserDocument sourceDocument
+  WHERE sourceDocument.DocumentId = job.SourceDocumentId AND sourceDocument.DeletedAt IS NULL
+)) AND NOT EXISTS (
+  SELECT 1 FROM AuditLog deletedSource
+  WHERE deletedSource.EntityType = 'user-document'
+    AND deletedSource.Action = 'admin-permanent-delete'
+    AND JSON_VALID(deletedSource.BeforeJson) = 1
+    AND (
+      JSON_UNQUOTE(JSON_EXTRACT(deletedSource.BeforeJson, '$.sourceImportJobId')) = job.SopImportJobId
+      OR JSON_UNQUOTE(JSON_EXTRACT(deletedSource.BeforeJson, '$.storageKey')) = job.StorageKey
+    )
+)`
+
 export class SopImportRepository {
   constructor(private readonly database: TransactionalDatabase) {}
 
@@ -157,7 +171,9 @@ export class SopImportRepository {
 
   async list(accountId: string) {
     const rows = await this.database.query<ImportRow>(`
-      SELECT * FROM SopImportJob WHERE CreatedBy = :accountId ORDER BY CreatedAt DESC LIMIT 50
+      SELECT job.* FROM SopImportJob job
+      WHERE job.CreatedBy = :accountId AND ${activeSourceCondition}
+      ORDER BY job.CreatedAt DESC LIMIT 50
     `, { accountId })
     return rows.map(mapRow)
   }
@@ -165,7 +181,7 @@ export class SopImportRepository {
   async listForActor(accountId: string, departmentName: string | null, jobTitle: string | null) {
     const rows = await this.database.query<ImportRow>(`
       SELECT job.* FROM SopImportJob job
-      WHERE job.CreatedBy = :accountId OR EXISTS (
+      WHERE ${activeSourceCondition} AND (job.CreatedBy = :accountId OR EXISTS (
         SELECT 1 FROM SopRoleAssignment roleRow
         WHERE roleRow.SopResourceId = job.TargetSopId AND roleRow.AccountId = :accountId
       ) OR (job.Status = 'published' AND EXISTS (
@@ -177,17 +193,24 @@ export class SopImportRepository {
           OR (audience.AudienceMode = 'department_job_title' AND :departmentName <> '' AND :jobTitle <> ''
             AND audience.DepartmentName = :departmentName AND audience.JobTitle = :jobTitle)
         )
-      )) ORDER BY job.CreatedAt DESC LIMIT 100
+      ))) ORDER BY job.CreatedAt DESC LIMIT 100
     `, { accountId, departmentName: departmentName ?? '', jobTitle: jobTitle ?? '' })
     return rows.map(mapRow)
   }
   async listAll() {
-    const rows = await this.database.query<ImportRow>('SELECT * FROM SopImportJob ORDER BY CreatedAt DESC LIMIT 200')
+    const rows = await this.database.query<ImportRow>(`
+      SELECT job.* FROM SopImportJob job
+      WHERE ${activeSourceCondition}
+      ORDER BY job.CreatedAt DESC LIMIT 200
+    `)
     return rows.map(mapRow)
   }
 
   async get(id: string) {
-    const [row] = await this.database.query<ImportRow>('SELECT * FROM SopImportJob WHERE SopImportJobId = :id', { id })
+    const [row] = await this.database.query<ImportRow>(`
+      SELECT job.* FROM SopImportJob job
+      WHERE job.SopImportJobId = :id AND ${activeSourceCondition}
+    `, { id })
     if (!row) throw notFound('SOP import', id)
     return mapRow(row)
   }
@@ -208,6 +231,87 @@ export class SopImportRepository {
     await this.database.query(`INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, AfterJson)
       VALUES ('sop-import', :id, 'update-preview', :accountId, :afterJson)`, {
       id, accountId, afterJson: JSON.stringify({ code: preview.code, steps: preview.steps.length })
+    })
+    return this.get(id)
+  }
+
+  async replaceDraftExtraction(id: string, input: {
+    extractedText: string
+    preview: CreateSopBody
+    warnings: string[]
+    accountId: string
+  }) {
+    const result = await this.database.query<{ affectedRows: number }>(`UPDATE SopImportJob
+      SET ExtractedText = :extractedText, PreviewJson = :previewJson,
+        WarningsJson = :warningsJson, UpdatedAt = UTC_TIMESTAMP(3)
+      WHERE SopImportJobId = :id AND CreatedBy = :accountId AND Status = 'needs_review'`, {
+      id,
+      accountId: input.accountId,
+      extractedText: input.extractedText,
+      previewJson: JSON.stringify(input.preview),
+      warningsJson: JSON.stringify(input.warnings)
+    })
+    if (!result[0]?.affectedRows) throw conflict('IMPORT_NOT_EDITABLE', 'Chỉ có thể phân tích lại bản chuyển hóa đang hiệu chỉnh')
+    await this.database.query(`INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, AfterJson)
+      VALUES ('sop-import', :id, 'reprocess-source-structure', :accountId, :afterJson)`, {
+      id,
+      accountId: input.accountId,
+      afterJson: JSON.stringify({
+        structureVersion: input.preview.sourceStructure?.schemaVersion ?? null,
+        outlineItems: input.preview.sourceStructure?.outline.length ?? 0,
+        steps: input.preview.steps.length
+      })
+    })
+    return this.get(id)
+  }
+
+  async listReprocessableDrafts() {
+    const rows = await this.database.query<ImportRow>(`
+      SELECT * FROM SopImportJob WHERE Status = 'needs_review' ORDER BY CreatedAt ASC
+    `)
+    return rows.map(mapRow)
+  }
+
+  async listWithoutSourceStructure() {
+    const rows = await this.database.query<ImportRow>(`
+      SELECT * FROM SopImportJob
+      WHERE JSON_EXTRACT(PreviewJson, '$.sourceStructure.schemaVersion') IS NULL
+        OR COALESCE(JSON_LENGTH(JSON_EXTRACT(PreviewJson, '$.sourceStructure.outline')), 0) = 0
+        OR (JSON_UNQUOTE(JSON_EXTRACT(PreviewJson, '$.sourceStructure.adapter')) = 'docx-ocr'
+          AND COALESCE(JSON_LENGTH(JSON_EXTRACT(PreviewJson, '$.sourceStructure.outline')), 0) <= 1)
+      ORDER BY CreatedAt ASC
+    `)
+    return rows.map(mapRow)
+  }
+
+  async attachSourceStructureSnapshot(id: string, input: {
+    extractedText: string
+    preview: CreateSopBody
+    warnings: string[]
+  }) {
+    const result = await this.database.query<{ affectedRows: number }>(`UPDATE SopImportJob
+      SET ExtractedText = :extractedText, PreviewJson = :previewJson,
+        WarningsJson = :warningsJson, UpdatedAt = UTC_TIMESTAMP(3)
+      WHERE SopImportJobId = :id
+        AND (JSON_EXTRACT(PreviewJson, '$.sourceStructure.schemaVersion') IS NULL
+          OR COALESCE(JSON_LENGTH(JSON_EXTRACT(PreviewJson, '$.sourceStructure.outline')), 0) = 0
+          OR (JSON_UNQUOTE(JSON_EXTRACT(PreviewJson, '$.sourceStructure.adapter')) = 'docx-ocr'
+            AND COALESCE(JSON_LENGTH(JSON_EXTRACT(PreviewJson, '$.sourceStructure.outline')), 0) <= 1))`, {
+      id,
+      extractedText: input.extractedText,
+      previewJson: JSON.stringify(input.preview),
+      warningsJson: JSON.stringify(input.warnings)
+    })
+    if (!result[0]?.affectedRows) return this.get(id)
+    await this.database.query(`INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, AfterJson)
+      SELECT 'sop-import', SopImportJobId, 'attach-source-structure', CreatedBy, :afterJson
+      FROM SopImportJob WHERE SopImportJobId = :id`, {
+      id,
+      afterJson: JSON.stringify({
+        structureVersion: input.preview.sourceStructure?.schemaVersion ?? null,
+        outlineItems: input.preview.sourceStructure?.outline.length ?? 0,
+        preservedPublishedSteps: true
+      })
     })
     return this.get(id)
   }
@@ -345,6 +449,7 @@ export class SopImportRepository {
         purpose: preview.purpose ?? null,
         scope: preview.scope ?? null,
         changeLog: preview.changeLog ?? null,
+        sourceStructure: preview.sourceStructure,
         steps: preview.steps,
         transitions: preview.transitions,
         access: {

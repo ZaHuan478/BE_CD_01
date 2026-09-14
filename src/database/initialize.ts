@@ -11,6 +11,9 @@ import { ensureAdministrationSchema } from './administration-schema.js'
 import { ensureHruxSopLibrary } from './hrux-sop-library.js'
 import { ensureUserDocumentSchema } from './user-document-schema.js'
 import { ensureModuleNavigationSchema } from './module-navigation-schema.js'
+import { ensureCompleteModuleCatalog } from './complete-module-catalog.js'
+import { ensureSystemGuideSchema } from './system-guide-schema.js'
+import { ensureSystemGlossarySchema } from './system-glossary-schema.js'
 
 export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promise<void> {
   const pool = mysql.createPool({
@@ -48,9 +51,12 @@ export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promi
         await assertCore8Ready(database)
         await ensureSopImportSchema(database)
         await ensureAdministrationSchema(database)
-        await ensureHruxSopLibrary(database)
         await ensureUserDocumentSchema(database)
         await ensureModuleNavigationSchema(database)
+        await ensureCompleteModuleCatalog(database)
+        await ensureSystemGuideSchema(database)
+        await ensureSystemGlossarySchema(database)
+        await ensureHruxSopLibrary(database)
         return
       }
       const [coreMarker] = await connection.query<mysql.RowDataPacket[]>(`SELECT TABLE_NAME FROM information_schema.TABLES
@@ -64,6 +70,9 @@ export async function initializeDatabase(env: AppEnv, schemaOnly = false): Promi
       await ensureAdministrationSchema(database)
       await ensureUserDocumentSchema(database)
       await ensureModuleNavigationSchema(database)
+      await ensureCompleteModuleCatalog(database)
+      await ensureSystemGuideSchema(database)
+      await ensureSystemGlossarySchema(database)
       if (schemaOnly) return
       if (env.database.importSnapshot) {
         const result = await importSnapshot(database, env.database.importSnapshot)

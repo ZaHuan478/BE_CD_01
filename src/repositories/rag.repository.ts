@@ -252,7 +252,13 @@ export class RagRepository {
     `)
 
     const [chunkCount] = await this.database.query<{ TotalChunks: number }>(`
-      SELECT COUNT(*) AS TotalChunks FROM RagChunk
+      SELECT COUNT(*) AS TotalChunks FROM RagChunk chunk
+      WHERE NOT EXISTS (
+        SELECT 1 FROM IndexDocumentState state
+        WHERE state.EntityId = chunk.SopId
+          AND state.VersionId = chunk.SopVersionId
+          AND state.IndexStatus = 'stale'
+      )
     `)
 
     const rows = await this.database.query<IndexStateRecord>(`
@@ -378,6 +384,12 @@ export class RagRepository {
         OR ${readableModuleIds.map((_, i) => `JSON_CONTAINS(ModuleIdsJson, JSON_QUOTE(:mod${i}))`).join(' OR ')}
         OR IsCommon = 1)
         AND EmbeddingJson IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM IndexDocumentState state
+          WHERE state.EntityId = RagChunk.SopId
+            AND state.VersionId = RagChunk.SopVersionId
+            AND state.IndexStatus = 'stale'
+        )
       LIMIT 5000
     `, Object.fromEntries(readableModuleIds.map((m, i) => [`mod${i}`, m])))
     const magnitude = (values: number[]) => Math.sqrt(values.reduce((sum, value) => sum + value * value, 0))
@@ -416,6 +428,12 @@ export class RagRepository {
         OR ${readableModuleIds.map((_, i) => `JSON_CONTAINS(ModuleIdsJson, JSON_QUOTE(:mod${i}))`).join(' OR ')}
         OR IsCommon = 1)
         AND (Title LIKE :searchPattern OR Content LIKE :searchPattern)
+        AND NOT EXISTS (
+          SELECT 1 FROM IndexDocumentState state
+          WHERE state.EntityId = RagChunk.SopId
+            AND state.VersionId = RagChunk.SopVersionId
+            AND state.IndexStatus = 'stale'
+        )
       ORDER BY ChunkIndex ASC
       LIMIT :limit
     `, params)

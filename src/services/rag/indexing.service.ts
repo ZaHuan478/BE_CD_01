@@ -13,6 +13,29 @@ export interface IndexProgress {
 
 type IndexProgressHandler = (progress: IndexProgress) => Promise<void>
 
+const activeSourceCondition = `NOT EXISTS (
+  SELECT 1 FROM SopImportJob sourceJob
+  WHERE sourceJob.TargetSopId = d.DocumentId
+    AND CAST(sourceJob.TargetVersionId AS UNSIGNED) = d.CurrentVersionNumber
+    AND (
+      (sourceJob.SourceDocumentId IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM UserDocument sourceDocument
+        WHERE sourceDocument.DocumentId = sourceJob.SourceDocumentId
+          AND sourceDocument.DeletedAt IS NULL
+      ))
+      OR EXISTS (
+        SELECT 1 FROM AuditLog deletedSource
+        WHERE deletedSource.EntityType = 'user-document'
+          AND deletedSource.Action = 'admin-permanent-delete'
+          AND JSON_VALID(deletedSource.BeforeJson) = 1
+          AND (
+            JSON_UNQUOTE(JSON_EXTRACT(deletedSource.BeforeJson, '$.sourceImportJobId')) = sourceJob.SopImportJobId
+            OR JSON_UNQUOTE(JSON_EXTRACT(deletedSource.BeforeJson, '$.storageKey')) = sourceJob.StorageKey
+          )
+      )
+    )
+)`
+
 export class IndexingService {
   private readonly extractor = new SopExtractor()
   private readonly repository: RagRepository
@@ -189,6 +212,7 @@ export class IndexingService {
         WHERE d.Status = 'published' AND d.Visibility = 'module'
           AND d.DocumentType IN ('procedure', 'policy', 'guide')
           AND v.Status = 'published'
+          AND ${activeSourceCondition}
           AND (v.EffectiveFrom IS NULL OR v.EffectiveFrom <= UTC_TIMESTAMP(3))
           AND (v.EffectiveTo IS NULL OR v.EffectiveTo > UTC_TIMESTAMP(3))
       `)
@@ -238,6 +262,7 @@ export class IndexingService {
         INNER JOIN KnowledgeDocumentVersion v ON v.DocumentId = d.DocumentId AND v.VersionNumber = d.CurrentVersionNumber
         WHERE m.ModuleId = :moduleId AND d.Status = 'published' AND d.Visibility = 'module'
           AND d.DocumentType IN ('procedure', 'policy', 'guide') AND v.Status = 'published'
+          AND ${activeSourceCondition}
           AND (v.EffectiveFrom IS NULL OR v.EffectiveFrom <= UTC_TIMESTAMP(3))
           AND (v.EffectiveTo IS NULL OR v.EffectiveTo > UTC_TIMESTAMP(3))
       `, { moduleId })
@@ -302,6 +327,7 @@ export class IndexingService {
       LEFT JOIN KnowledgeDocumentVersion v ON v.DocumentId = d.DocumentId AND v.VersionNumber = d.CurrentVersionNumber
       WHERE d.DocumentId = :documentId AND d.Status = 'published' AND d.Visibility = 'module'
         AND d.DocumentType IN ('procedure', 'policy', 'guide') AND v.Status = 'published'
+        AND ${activeSourceCondition}
         AND (v.EffectiveFrom IS NULL OR v.EffectiveFrom <= UTC_TIMESTAMP(3))
         AND (v.EffectiveTo IS NULL OR v.EffectiveTo > UTC_TIMESTAMP(3))
       GROUP BY d.DocumentId, d.Code, d.Title, d.DocumentType, d.Summary, d.Status, d.CurrentVersionNumber, v.ContentJson

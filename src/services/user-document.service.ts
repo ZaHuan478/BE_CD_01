@@ -165,8 +165,10 @@ export class UserDocumentService {
 
   async permanentDeleteAdmin(principal: AuthPrincipal, id: string) {
     this.requireAdmin(principal)
-    const { storageKey } = await this.repository.permanentDeleteAdmin(id, principal.accountId)
-    await this.storage.remove(storageKey)
+    const { storageKey, shouldRemoveStorage } = await this.repository.permanentDeleteAdmin(id, principal.accountId)
+    if (shouldRemoveStorage && storageKey) {
+      await this.storage.remove(storageKey)
+    }
     return { id, success: true }
   }
 

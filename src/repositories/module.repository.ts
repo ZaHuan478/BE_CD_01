@@ -60,7 +60,9 @@ export class ModuleRepository {
     const rows = await this.database.query<ModuleRow>(`
       SELECT ${selectColumns}
       FROM HrModule
-      ORDER BY SortOrder, Title
+      ORDER BY CASE BusinessCluster
+        WHEN 'core' THEN 1 WHEN 'people' THEN 2 WHEN 'organization' THEN 3 WHEN 'platform' THEN 4 ELSE 5
+      END, SortOrder, Title
     `)
     return rows.map(mapModule)
   }

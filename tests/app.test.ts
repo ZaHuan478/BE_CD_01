@@ -100,7 +100,7 @@ class FakeDatabase implements TransactionalDatabase {
         { ModuleId: 'emp', ModuleCode: 'EMP', Title: 'Hồ sơ nhân viên', IsCommon: false, GrantSource: 'manual' }
       ] as T[]
     }
-    if (statement.includes('FROM HrModule') && statement.includes('ORDER BY SortOrder, Title')) {
+    if (statement.includes('FROM HrModule') && (statement.includes('ORDER BY SortOrder, Title') || statement.includes('ORDER BY CASE BusinessCluster'))) {
       return [
         {
           ModuleId: 'common', ModuleCode: 'COMMON', Title: 'Thông tin chung', Description: null,

@@ -15,18 +15,21 @@ describe('Cloudinary storage', () => {
   it('uploads raw authenticated bytes without writing to disk', async () => {
     const bytes = Buffer.from('%PDF-test')
     let received: Buffer | undefined
-    const upload = vi.spyOn(cloudinary.uploader, 'upload_stream').mockImplementation((options: any, callback: any) => {
+    const upload = vi.spyOn(cloudinary.uploader, 'upload_stream').mockImplementation(((...args: any[]) => {
+      const options = args.length === 2 ? args[0] : {}
+      const callback = args.length === 2 ? args[1] : args[0]
       return new Writable({ write(chunk, _encoding, done) { received = chunk; done() }, final(done) { callback(null, { public_id: options.public_id }); done() } }) as any
-    })
+    }) as any)
     expect(await new DocumentStorage(env).put('test.pdf', bytes)).toBe('cloudinary:hrm_documents/test.pdf')
     expect(received).toEqual(bytes)
     expect(upload.mock.calls[0]?.[0]).toMatchObject({ resource_type: 'raw', type: 'authenticated', overwrite: false })
   })
 
   it('does not expose provider errors or fall back to local disk after upload failure', async () => {
-    vi.spyOn(cloudinary.uploader, 'upload_stream').mockImplementation((_options: any, callback: any) => {
+    vi.spyOn(cloudinary.uploader, 'upload_stream').mockImplementation(((...args: any[]) => {
+      const callback = args.length === 2 ? args[1] : args[0]
       return new Writable({ write(_chunk, _encoding, done) { callback({ message: 'sensitive provider details' }); done() } }) as any
-    })
+    }) as any)
     await expect(new DocumentStorage(env).put('test.docx', Buffer.from('test'))).rejects.toMatchObject({ code: 'STORAGE_UPLOAD_FAILED' })
   })
 

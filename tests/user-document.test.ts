@@ -194,6 +194,16 @@ const mockEnv: AppEnv = {
     directory: 'data/uploads/sop-imports',
     maxBytes: 10 * 1024 * 1024
   },
+  gemini: {
+    embeddingModel: 'text-embedding-004',
+    embeddingDimension: 768,
+    chatModel: 'gemini-1.5-flash'
+  },
+  rag: {
+    topK: 5,
+    similarityThreshold: 0.7,
+    chunkMaxTokens: 500
+  },
   database: {
     host: '127.0.0.1',
     port: 3306,

@@ -44,6 +44,10 @@ import { RetrievalService } from './services/rag/retrieval.service.js'
 import { ChatService } from './services/chat/chat.service.js'
 import { ragRoutes } from './routes/rag.routes.js'
 import { chatRoutes } from './routes/chat.routes.js'
+import { SystemGuideRepository } from './repositories/system-guide.repository.js'
+import { systemGuideRoutes } from './routes/system-guide.routes.js'
+import { SystemGlossaryRepository } from './repositories/system-glossary.repository.js'
+import { systemGlossaryRoutes } from './routes/system-glossary.routes.js'
 
 export interface AppDependencies {
   env: AppEnv
@@ -183,6 +187,8 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     await api.register(accessRoutes(authService, new AccessRepository(database, core8), core8))
     await api.register(administrationRoutes(authService, database, core8))
     await api.register(userDocumentRoutes(authService, database, env))
+    await api.register(systemGuideRoutes(authService, new SystemGuideRepository(database)))
+    await api.register(systemGlossaryRoutes(authService, new SystemGlossaryRepository(database)))
     // Khởi tạo các services cho AI RAG & Chatbot
     await api.register(sopWorkspaceRoutes(authService, new SopWorkspaceRepository(database), indexingService))
     const retrievalService = new RetrievalService(database, moduleRepository, geminiClient,

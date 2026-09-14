@@ -11,6 +11,9 @@ import { ensureUserDocumentSchema } from './database/user-document-schema.js'
 import { ensureModuleNavigationSchema } from './database/module-navigation-schema.js'
 import { ensureRagSchema } from './database/rag-schema.js'
 import { ensureSopWorkspaceSchema } from './database/sop-workspace-schema.js'
+import { ensureSystemGuideSchema } from './database/system-guide-schema.js'
+import { ensureSystemGlossarySchema } from './database/system-glossary-schema.js'
+import { ensureCompleteModuleCatalog, ensureCompleteModuleRagScopes } from './database/complete-module-catalog.js'
 
 const env = loadEnv()
 const database = new Database(env)
@@ -38,8 +41,12 @@ try {
   await ensureAdministrationSchema(database)
   await ensureUserDocumentSchema(database)
   await ensureModuleNavigationSchema(database)
+  await ensureCompleteModuleCatalog(database)
   await ensureRagSchema(database)
+  await ensureCompleteModuleRagScopes(database)
   await ensureSopWorkspaceSchema(database)
+  await ensureSystemGuideSchema(database)
+  await ensureSystemGlossarySchema(database)
   if (env.databaseModel === 'core8') await ensureHruxSopLibrary(database)
   app.log.info(
     { database: env.database.name, databaseModel: env.databaseModel },

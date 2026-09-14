@@ -1,10 +1,11 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { AppError } from '../common/errors.js'
-import type { CreateDocumentConversionBody, ReviewSopImportBody, UpdateSopImportBody } from '../schemas/sop-import.schemas.js'
+import type { CreateDocumentConversionBody, ReviewSopImportBody, UpdateSopImportBody, UpdateMediaBody, CropMediaBody } from '../schemas/sop-import.schemas.js'
 import type { AuthService } from '../services/auth.service.js'
 import type { SopImportService } from '../services/sop-import.service.js'
 
 interface ImportParams { importId: string }
+interface MediaParams { importId: string; mediaId: string }
 
 function contentDisposition(fileName: string): string {
   const ascii = fileName.replace(/[^\x20-\x7E]+/g, '_').replace(/["\\]/g, '_')
@@ -66,6 +67,10 @@ export class SopImportController {
     return { data: await this.service.update(await this.auth.authenticate(request), request.params.importId, request.body), requestId: request.id }
   }
 
+  async reprocess(request: FastifyRequest<{ Params: ImportParams }>) {
+    return { data: await this.service.reprocess(await this.auth.authenticate(request), request.params.importId), requestId: request.id }
+  }
+
   async flow(request: FastifyRequest<{ Params: ImportParams }>) {
     return { data: await this.service.flow(await this.auth.authenticate(request), request.params.importId), requestId: request.id }
   }
@@ -106,5 +111,29 @@ export class SopImportController {
       .header('content-disposition', contentDisposition(source.fileName))
       .send(source.buffer)
   }
-}
 
+  async getMedia(request: FastifyRequest<{ Params: ImportParams }>) {
+    return { data: await this.service.getMedia(await this.auth.authenticate(request), request.params.importId), requestId: request.id }
+  }
+
+  async getMediaPreview(request: FastifyRequest<{ Params: MediaParams }>, reply: FastifyReply) {
+    const preview = await this.service.getMediaPreview(await this.auth.authenticate(request), request.params.importId, request.params.mediaId)
+    return reply.header('content-type', preview.mimeType)
+      .header('cache-control', 'private, max-age=3600')
+      .header('x-content-type-options', 'nosniff')
+      .send(preview.buffer)
+  }
+
+  async updateMedia(request: FastifyRequest<{ Params: MediaParams; Body: UpdateMediaBody }>) {
+    return { data: await this.service.updateMedia(await this.auth.authenticate(request), request.params.importId, request.params.mediaId, request.body), requestId: request.id }
+  }
+
+  async cropMedia(request: FastifyRequest<{ Params: ImportParams; Body: CropMediaBody }>, reply: FastifyReply) {
+    const data = await this.service.cropMedia(await this.auth.authenticate(request), request.params.importId, request.body)
+    return reply.code(201).send({ data, requestId: request.id })
+  }
+
+  async reextractMedia(request: FastifyRequest<{ Params: ImportParams }>) {
+    return { data: await this.service.reextractMedia(await this.auth.authenticate(request), request.params.importId), requestId: request.id }
+  }
+}

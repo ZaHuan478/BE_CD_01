@@ -1,5 +1,5 @@
 import { conflict, notFound } from '../common/errors.js'
-import type { DatabaseParameters, TransactionalDatabase } from '../database/database.js'
+import type { DatabaseParameters, QueryRunner, TransactionalDatabase } from '../database/database.js'
 
 export interface UserDocumentRow {
   DocumentId: string
@@ -141,6 +141,20 @@ export function mapAdminUserDocumentRow(row: AdminUserDocumentRow): AdminUserDoc
 export class UserDocumentRepository {
   constructor(private readonly database: TransactionalDatabase) {}
 
+  private async markDerivedIndexStale(
+    runner: QueryRunner,
+    documentId: string,
+    sourceImportJobId: string | null
+  ): Promise<void> {
+    await runner.query(`
+      UPDATE IndexDocumentState state
+      INNER JOIN SopImportJob job ON job.TargetSopId = state.EntityId
+      SET state.IndexStatus = 'stale', state.UpdatedAt = UTC_TIMESTAMP(3)
+      WHERE job.SourceDocumentId = :documentId
+         OR (:sourceImportJobId IS NOT NULL AND job.SopImportJobId = :sourceImportJobId)
+    `, { documentId, sourceImportJobId })
+  }
+
   async findDuplicate(checksum: string, accountId: string): Promise<UserDocumentItem | null> {
     const [row] = await this.database.query<UserDocumentRow>(`
       SELECT * FROM UserDocument
@@ -236,20 +250,25 @@ export class UserDocumentRepository {
   }
 
   async softDelete(id: string, accountId: string): Promise<UserDocumentItem> {
-    const result = await this.database.query<{ affectedRows: number }>(`
-      UPDATE UserDocument
-      SET DeletedAt = UTC_TIMESTAMP(3), UpdatedAt = UTC_TIMESTAMP(3)
-      WHERE DocumentId = :id AND CreatedBy = :accountId AND DeletedAt IS NULL
-    `, { id, accountId })
+    await this.database.transaction(async runner => {
+      const [row] = await runner.query<UserDocumentRow>(`
+        SELECT * FROM UserDocument
+        WHERE DocumentId = :id AND CreatedBy = :accountId AND DeletedAt IS NULL
+        FOR UPDATE
+      `, { id, accountId })
+      if (!row) throw notFound('Tài liệu cá nhân', id)
 
-    if (!result[0]?.affectedRows) {
-      throw notFound('Tài liệu cá nhân', id)
-    }
-
-    await this.database.query(`
-      INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId)
-      VALUES ('user-document', :id, 'trash', :accountId)
-    `, { id, accountId })
+      await runner.query(`
+        UPDATE UserDocument
+        SET DeletedAt = UTC_TIMESTAMP(3), UpdatedAt = UTC_TIMESTAMP(3)
+        WHERE DocumentId = :id AND CreatedBy = :accountId AND DeletedAt IS NULL
+      `, { id, accountId })
+      await this.markDerivedIndexStale(runner, id, row.SourceImportJobId)
+      await runner.query(`
+        INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, AfterJson)
+        VALUES ('user-document', :id, 'trash', :accountId, :afterJson)
+      `, { id, accountId, afterJson: JSON.stringify({ derivedIndexStatus: 'stale' }) })
+    })
 
     return this.get(id, accountId)
   }
@@ -477,20 +496,23 @@ export class UserDocumentRepository {
   }
 
   async softDeleteAdmin(id: string, actorAccountId: string): Promise<AdminUserDocumentItem> {
-    const result = await this.database.query<{ affectedRows: number }>(`
-      UPDATE UserDocument
-      SET DeletedAt = UTC_TIMESTAMP(3), UpdatedAt = UTC_TIMESTAMP(3)
-      WHERE DocumentId = :id AND DeletedAt IS NULL
-    `, { id })
+    await this.database.transaction(async runner => {
+      const [row] = await runner.query<UserDocumentRow>(`
+        SELECT * FROM UserDocument WHERE DocumentId = :id AND DeletedAt IS NULL FOR UPDATE
+      `, { id })
+      if (!row) throw notFound('Tài liệu', id)
 
-    if (!result[0]?.affectedRows) {
-      throw notFound('Tài liệu', id)
-    }
-
-    await this.database.query(`
-      INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId)
-      VALUES ('user-document', :id, 'admin-trash', :actorAccountId)
-    `, { id, actorAccountId })
+      await runner.query(`
+        UPDATE UserDocument
+        SET DeletedAt = UTC_TIMESTAMP(3), UpdatedAt = UTC_TIMESTAMP(3)
+        WHERE DocumentId = :id AND DeletedAt IS NULL
+      `, { id })
+      await this.markDerivedIndexStale(runner, id, row.SourceImportJobId)
+      await runner.query(`
+        INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, AfterJson)
+        VALUES ('user-document', :id, 'admin-trash', :actorAccountId, :afterJson)
+      `, { id, actorAccountId, afterJson: JSON.stringify({ derivedIndexStatus: 'stale' }) })
+    })
 
     return this.getAdmin(id)
   }
@@ -514,37 +536,49 @@ export class UserDocumentRepository {
     return this.getAdmin(id)
   }
 
-  async permanentDeleteAdmin(id: string, actorAccountId: string): Promise<{ id: string; storageKey: string }> {
-    const doc = await this.getAdmin(id)
-    if (doc.sourceImportJobId) {
-      throw conflict('DOCUMENT_HAS_CONVERSION', 'Tài liệu đang được dùng làm nguồn cho một SOP; hãy xóa hồ sơ chuyển hóa trước')
-    }
+  async permanentDeleteAdmin(id: string, actorAccountId: string): Promise<{ id: string; storageKey: string; shouldRemoveStorage: boolean }> {
+    return this.database.transaction(async runner => {
+      const [row] = await runner.query<UserDocumentRow>(`
+        SELECT * FROM UserDocument WHERE DocumentId = :id FOR UPDATE
+      `, { id })
+      if (!row) throw notFound('Tài liệu', id)
+      const doc = mapUserDocumentRow(row)
 
-    const result = await this.database.query<{ affectedRows: number }>(`
-      DELETE FROM UserDocument WHERE DocumentId = :id
-    `, { id })
+      await this.markDerivedIndexStale(runner, id, doc.sourceImportJobId)
 
-    if (!result[0]?.affectedRows) {
-      throw notFound('Tài liệu', id)
-    }
+      const result = await runner.query<{ affectedRows: number }>(`
+        DELETE FROM UserDocument WHERE DocumentId = :id
+      `, { id })
+      if (!result[0]?.affectedRows) throw notFound('Tài liệu', id)
 
-    await this.database.query(`
-      INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, BeforeJson)
-      VALUES ('user-document', :id, 'admin-permanent-delete', :actorAccountId, :beforeJson)
-    `, {
-      id,
-      actorAccountId,
-      beforeJson: JSON.stringify({
-        displayName: doc.displayName,
-        originalFileName: doc.originalFileName,
-        storageKey: doc.storageKey,
-        fileSize: doc.fileSize,
-        checksum: doc.checksum,
-        createdBy: doc.createdBy
+      // A conversion job keeps its own reference to the same stored object.
+      // Purge Cloudinary only after the final database reference disappears.
+      const stillReferenced = await runner.query<{ ExistingReference: number }>(`
+        SELECT 1 AS ExistingReference FROM UserDocument WHERE StorageKey = :storageKey
+        UNION ALL
+        SELECT 1 AS ExistingReference FROM SopImportJob WHERE StorageKey = :storageKey
+        LIMIT 1
+      `, { storageKey: doc.storageKey })
+
+      await runner.query(`
+        INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, BeforeJson)
+        VALUES ('user-document', :id, 'admin-permanent-delete', :actorAccountId, :beforeJson)
+      `, {
+        id,
+        actorAccountId,
+        beforeJson: JSON.stringify({
+          displayName: doc.displayName,
+          originalFileName: doc.originalFileName,
+          storageKey: doc.storageKey,
+          fileSize: doc.fileSize,
+          checksum: doc.checksum,
+          createdBy: doc.createdBy,
+          sourceImportJobId: doc.sourceImportJobId
+        })
       })
-    })
 
-    return { id, storageKey: doc.storageKey }
+      return { id, storageKey: doc.storageKey, shouldRemoveStorage: stillReferenced.length === 0 }
+    })
   }
 
   async batchActionAdmin(
@@ -582,7 +616,9 @@ export class UserDocumentRepository {
       for (const id of ids) {
         try {
           const res = await this.permanentDeleteAdmin(id, actorAccountId)
-          deletedStorageKeys.push(res.storageKey)
+          if (res.shouldRemoveStorage && res.storageKey) {
+            deletedStorageKeys.push(res.storageKey)
+          }
           count++
         } catch { /* skip */ }
       }
