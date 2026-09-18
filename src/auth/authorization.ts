@@ -6,7 +6,7 @@ export function hasPermission(
   scopeType?: ScopeType,
   scopeId?: string
 ): boolean {
-  return principal.grants.some((grant) => {
+  return (principal.grants ?? []).some((grant) => {
     if (grant.permissionCode !== permissionCode) return false
     if (grant.scopeType === 'system' && grant.scopeId === '*') return true
     return grant.scopeType === scopeType && grant.scopeId === scopeId
@@ -25,6 +25,6 @@ export function canAccessSop(
 }
 
 export function hasAnyPermission(principal: AuthPrincipal, permissionCode: string): boolean {
-  return principal.grants.some((grant) => grant.permissionCode === permissionCode)
+  return (principal.grants ?? []).some((grant) => grant.permissionCode === permissionCode)
 }
 

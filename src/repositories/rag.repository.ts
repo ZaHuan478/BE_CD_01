@@ -443,15 +443,11 @@ export class RagRepository {
     limit = 5
   ): Promise<RagChunkRecord[]> {
     if (readableModuleIds.length === 0) return []
-    const searchPattern = `%${queryText}%`
+    const searchPattern = `%${queryText.trim()}%`
     const modulePlaceholders = readableModuleIds.map((_, i) => `:mod${i}`).join(', ')
-    const params: DatabaseParameters = {
-      ...Object.fromEntries(readableModuleIds.map((m, i) => [`mod${i}`, m])),
-      searchPattern,
-      limit
-    }
+    const baseParams: DatabaseParameters = Object.fromEntries(readableModuleIds.map((m, i) => [`mod${i}`, m]))
 
-    return this.database.query<RagChunkRecord>(`
+    const exactResults = await this.database.query<RagChunkRecord>(`
       SELECT RagChunkId, SopId, SopVersionId, SopStepId, ModuleId, ModuleIdsJson, IsCommon,
              ChunkType, ChunkIndex, Title, Content, ContentHash, MetadataJson
       FROM RagChunk
@@ -467,6 +463,47 @@ export class RagRepository {
         )
       ORDER BY ChunkIndex ASC
       LIMIT :limit
-    `, params)
+    `, { ...baseParams, searchPattern, limit })
+
+    if (exactResults.length >= limit) return exactResults
+
+    // Fallback: tokenize query into meaningful terms
+    const stopwords = new Set(['quy', 'trình', 'bước', 'như', 'thế', 'nào', 'là', 'gì', 'cho', 'tôi', 'biết', 'làm', 'sao', 'để', 'có', 'và', 'của', 'các', 'trong', 'về'])
+    const tokens = queryText
+      .split(/[\s,?.!;:()\[\]{}'"]+/)
+      .map(t => t.trim())
+      .filter(t => t.length >= 2 && !stopwords.has(t.toLowerCase()))
+
+    if (tokens.length === 0) return exactResults
+
+    const tokenPlaceholders = tokens.slice(0, 5).map((_, i) => `:tok${i}`)
+    const tokenParams: DatabaseParameters = {
+      ...baseParams,
+      limit: limit - exactResults.length,
+      ...Object.fromEntries(tokens.slice(0, 5).map((t, i) => [`tok${i}`, `%${t}%`]))
+    }
+
+    const tokenConditions = tokenPlaceholders.map(p => `(Title LIKE ${p} OR Content LIKE ${p})`).join(' OR ')
+    const existingIds = new Set(exactResults.map(r => r.RagChunkId))
+
+    const tokenResults = await this.database.query<RagChunkRecord>(`
+      SELECT RagChunkId, SopId, SopVersionId, SopStepId, ModuleId, ModuleIdsJson, IsCommon,
+             ChunkType, ChunkIndex, Title, Content, ContentHash, MetadataJson
+      FROM RagChunk
+      WHERE (ModuleId IN (${modulePlaceholders})
+        OR ${readableModuleIds.map((_, i) => `JSON_CONTAINS(ModuleIdsJson, JSON_QUOTE(:mod${i}))`).join(' OR ')}
+        OR IsCommon = 1)
+        AND (${tokenConditions})
+        AND NOT EXISTS (
+          SELECT 1 FROM IndexDocumentState state
+          WHERE state.EntityId = RagChunk.SopId
+            AND state.VersionId = RagChunk.SopVersionId
+            AND state.IndexStatus = 'stale'
+        )
+      ORDER BY ChunkIndex ASC
+      LIMIT :limit
+    `, tokenParams)
+
+    return [...exactResults, ...tokenResults.filter(r => !existingIds.has(r.RagChunkId))].slice(0, limit)
   }
 }

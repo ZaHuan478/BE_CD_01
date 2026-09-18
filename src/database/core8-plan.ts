@@ -4,6 +4,7 @@ import { core8Tables, legacyTables, tableExists } from './core8-schema.js'
 import { buildKnowledgeCatalog } from '../common/knowledge-catalog.js'
 import { contentHash } from './normalize-knowledge.js'
 import { jsonValue } from '../repositories/core-document.repository.js'
+import { isMasterDataCatalogEntry, isMasterDataCode } from '../common/procedure-classification.js'
 
 export type Row = Record<string, any>
 export type Core8Snapshot = { format: 'core8-backup-v1'; database: string; tables: Record<string, Row[]> }
@@ -46,7 +47,9 @@ export function planCore8(snapshot: Core8Snapshot) {
   // Preserve workflow/process ordering, not hash order used in search lists.
   for (const [workflowId, entries] of Object.entries(workflows as Record<string, Row[]>)) for (const entry of entries) {
     const original = originals.find(doc => doc.workflowId === workflowId && doc.code === entry.sopCode)!
-    const document = make(original.sourceKey, original.code, original.title, 'procedure', original.content, original.moduleIds)
+    const type = isMasterDataCatalogEntry(original.code, workflowId) ? 'catalog'
+      : isMasterDataCode(original.code) ? 'guide' : 'procedure'
+    const document = make(original.sourceKey, original.code, original.title, type, original.content, original.moduleIds)
     document.workflowId = workflowId
     documents.push(document)
   }

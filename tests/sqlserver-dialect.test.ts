@@ -39,6 +39,18 @@ describe('SQL Server repository dialect', () => {
     expect(result.statement).toContain('DB_NAME() = @databaseName')
   })
 
+  it('translates MySQL Unicode document search to SQL Server', () => {
+    const result = translateSqlServerStatement(`SELECT COUNT(*) AS Total FROM KnowledgeDocument d
+      WHERE CONCAT_WS(' ', d.Code, d.Title, d.Summary,
+        CAST(d.ContentJson AS CHAR CHARACTER SET utf8mb4))
+        COLLATE utf8mb4_vi_0900_ai_ci LIKE :search ESCAPE '='`)
+
+    expect(result.statement).toContain('CONVERT(NVARCHAR(MAX), d.ContentJson)')
+    expect(result.statement).toContain('COLLATE Vietnamese_100_CI_AI LIKE @search')
+    expect(result.statement).not.toContain('CHARACTER SET utf8mb4')
+    expect(result.statement).not.toContain('utf8mb4_vi_0900_ai_ci')
+  })
+
   it('translates joined updates and duplicate-tolerant inserts', () => {
     const update = translateSqlServerStatement(`UPDATE IndexDocumentState state
       INNER JOIN SopImportJob job ON job.TargetSopId = state.EntityId
@@ -52,5 +64,7 @@ describe('SQL Server repository dialect', () => {
     const locked = translateSqlServerStatement('SELECT * FROM KnowledgeDocument WHERE DocumentId = :id LIMIT 1 FOR UPDATE')
     expect(locked.statement).toContain('FROM KnowledgeDocument WITH (UPDLOCK, ROWLOCK)')
     expect(locked.statement).toContain('SELECT TOP (1) *')
+    const lockedWithAlias = translateSqlServerStatement('SELECT d.DocumentId FROM KnowledgeDocument d JOIN KnowledgeDocumentVersion v ON v.DocumentId = d.DocumentId FOR UPDATE')
+    expect(lockedWithAlias.statement).toContain('FROM KnowledgeDocument d WITH (UPDLOCK, ROWLOCK) JOIN KnowledgeDocumentVersion v')
   })
 })

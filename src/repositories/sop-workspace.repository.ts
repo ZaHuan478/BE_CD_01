@@ -2,6 +2,7 @@ import type { QueryRunner, TransactionalDatabase } from '../database/database.js
 import { contentHash } from '../database/normalize-knowledge.js'
 import { createId } from '../common/ids.js'
 import { conflict } from '../common/errors.js'
+import { isMasterDataCode, isProcedureDefinition } from '../common/procedure-classification.js'
 
 export type State = 'draft' | 'submitted' | 'reviewed' | 'published' | 'archived' | 'trash'
 export type Action = 'submit' | 'review' | 'reject' | 'publish' | 'archive' | 'trash' | 'restore'
@@ -133,6 +134,12 @@ export class SopWorkspaceRepository {
     actor: string
     workspaceDraftId: string
   }, runner: QueryRunner = this.db): Promise<{ documentId: string; version: number }> {
+    if (isMasterDataCode(params.code)) {
+      throw conflict('MASTER_DATA_NOT_PROCEDURE', 'Tài liệu mã MD thuộc Master Data, không được công bố trong Thư viện quy trình.')
+    }
+    if (!isProcedureDefinition(params.content)) {
+      throw conflict('PROCEDURE_STEPS_REQUIRED', 'SOP cần ít nhất hai bước nghiệp vụ khác nhau.')
+    }
     let documentId = params.documentId
     let version = params.baseVersion
 

@@ -164,7 +164,10 @@ export class AdministrationRepository {
   }
 
   async bootstrapSuperAdmin(accountId: string, actorAccountId: string) {
-    return this.database.transaction(async runner => {
+    const execute = typeof (this.database as any).transaction === 'function'
+      ? (op: (runner: QueryRunner) => Promise<any>) => (this.database as any).transaction(op)
+      : async (op: (runner: QueryRunner) => Promise<any>) => op(this.database)
+    return execute(async runner => {
       const [existing] = await runner.query<{ AccountId: string }>("SELECT AccountId FROM Account WHERE SystemRole = 'SUPER_ADMIN' AND IsActive = 1 LIMIT 1 FOR UPDATE")
       if (existing) throw conflict('SUPER_ADMIN_EXISTS', 'Hệ thống đã có Super Admin')
       const [target] = await runner.query<{ AccountId: string; SystemRole: string; IsActive: boolean }>('SELECT AccountId, SystemRole, IsActive FROM Account WHERE AccountId = :accountId FOR UPDATE', { accountId })

@@ -4,6 +4,7 @@ import { createId } from '../common/ids.js'
 import { conflict, notFound } from '../common/errors.js'
 import { contentHash } from '../database/normalize-knowledge.js'
 import { jsonValue, publishedWhere } from './core-document.repository.js'
+import { isMasterDataCode, isProcedureDefinition } from '../common/procedure-classification.js'
 
 export class Core8Repository {
   constructor(private readonly database: TransactionalDatabase) {}
@@ -26,6 +27,12 @@ export class Core8Repository {
       VALUES ('knowledge-document', :id, :action, :actor, :after)`, { id, action, actor, after: JSON.stringify(after) })
   }
   async create(body: CoreDocumentBody, actor: string) {
+    if (body.type === 'procedure' && isMasterDataCode(body.code)) {
+      throw conflict('MASTER_DATA_NOT_PROCEDURE', 'Tài liệu mã MD thuộc Master Data, không được công bố trong Thư viện quy trình.')
+    }
+    if (body.type === 'procedure' && !isProcedureDefinition(body.content)) {
+      throw conflict('PROCEDURE_STEPS_REQUIRED', 'SOP cần ít nhất hai bước nghiệp vụ khác nhau; danh mục hoặc mô tả một bước không thuộc Thư viện quy trình.')
+    }
     this.validateDates(body)
     return this.database.transaction(async runner => {
       const id = createId('doc')
@@ -50,9 +57,15 @@ export class Core8Repository {
   async addVersion(id: string, body: CoreVersionBody, actor: string) {
     this.validateDates(body)
     return this.database.transaction(async runner => {
-      const [row] = await runner.query<{ CurrentVersionNumber: number }>("SELECT CurrentVersionNumber FROM KnowledgeDocument WHERE DocumentId = :id AND Visibility = 'module' FOR UPDATE", { id })
+      const [row] = await runner.query<{ CurrentVersionNumber: number; DocumentType: string; Code: string }>("SELECT CurrentVersionNumber, DocumentType, Code FROM KnowledgeDocument WHERE DocumentId = :id AND Visibility = 'module' FOR UPDATE", { id })
       if (!row) throw notFound('Document', id)
       if (row.CurrentVersionNumber !== body.expectedVersion) throw conflict('VERSION_CONFLICT', 'Document changed; refresh before publishing a new version')
+      if (row.DocumentType === 'procedure' && isMasterDataCode(row.Code)) {
+        throw conflict('MASTER_DATA_NOT_PROCEDURE', 'Tài liệu mã MD thuộc Master Data, không được công bố trong Thư viện quy trình.')
+      }
+      if (row.DocumentType === 'procedure' && !isProcedureDefinition(body.content)) {
+        throw conflict('PROCEDURE_STEPS_REQUIRED', 'SOP cần ít nhất hai bước nghiệp vụ khác nhau.')
+      }
       await this.validateReferences(runner, body.content)
       const [latest] = await runner.query<{ LastVersion: number }>('SELECT MAX(VersionNumber) AS LastVersion FROM KnowledgeDocumentVersion WHERE DocumentId = :id', { id })
       const version = Number(latest?.LastVersion ?? row.CurrentVersionNumber) + 1

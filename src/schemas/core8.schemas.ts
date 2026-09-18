@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
 export const coreDocumentBody = Type.Object({
   code: Type.String({ minLength: 1, maxLength: 200 }), title: Type.String({ minLength: 1, maxLength: 1000 }),
-  type: Type.Union(['procedure', 'policy', 'guide', 'glossary', 'form'].map(value => Type.Literal(value))),
+  type: Type.Union(['procedure', 'policy', 'guide', 'glossary', 'form', 'catalog'].map(value => Type.Literal(value))),
   summary: Type.String({ maxLength: 10000 }),
   moduleIds: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), { minItems: 1, maxItems: 100, uniqueItems: true }),
   content: Type.Record(Type.String(), Type.Unknown()),

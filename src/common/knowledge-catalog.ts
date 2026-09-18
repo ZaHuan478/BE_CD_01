@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { allRuntimeModuleIds, scopeRuntimeDatasets } from './dataset-scope.js'
+import { isMasterDataCatalogEntry, isMasterDataCode } from './procedure-classification.js'
 
 export type JsonObject = Record<string, unknown>
 export function isObject(value: unknown): value is JsonObject {
@@ -10,7 +11,7 @@ export interface KnowledgeDocument {
   id: string
   code: string
   title: string
-  type: 'procedure' | 'policy'
+  type: 'procedure' | 'policy' | 'catalog' | 'guide'
   summary: string
   workflowId: string | null
   sourceKey: string
@@ -44,7 +45,9 @@ export function buildKnowledgeCatalog(workflows: unknown, policies: unknown): Kn
           return scoped[workflowId]?.some(item => item.sopCode === process.sopCode)
         }).map(([moduleId]) => moduleId)
         documents.push({ id: idFor(sourceKey), code: process.sopCode, title: process.sopTitle,
-          type: 'procedure', summary: String(process.description ?? ''), workflowId, sourceKey, moduleIds, content: process })
+          type: isMasterDataCatalogEntry(process.sopCode, workflowId) ? 'catalog'
+            : isMasterDataCode(process.sopCode) ? 'guide' : 'procedure',
+          summary: String(process.description ?? ''), workflowId, sourceKey, moduleIds, content: process })
       }
     }
   } else throw new Error('workflow.sopDatabase must be an object')

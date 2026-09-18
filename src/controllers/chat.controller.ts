@@ -10,10 +10,55 @@ export class ChatController {
   ) {}
 
   async complete(
-    request: FastifyRequest<{ Body: ChatCompletionRequest }>,
+    request: FastifyRequest<{ Body: ChatCompletionRequest; Querystring: { mockFault?: string } }>,
     reply: FastifyReply
   ) {
     const principal = await this.auth.authenticate(request)
+    const mockFault = ((request.headers['x-mock-fault'] as string | undefined) || request.query.mockFault || (request.body as any)?.mockFault)?.toLowerCase()
+
+    if (mockFault === 'timeout') {
+      const sessionId = request.body.sessionId || crypto.randomUUID()
+      if (request.body.stream) {
+        reply.raw.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive'
+        })
+        reply.raw.write(`data: ${JSON.stringify({ type: 'error', code: 'AI_TIMEOUT', message: 'Dịch vụ AI phản hồi quá thời gian quy định (Timeout mô phỏng UAT). Bạn có thể nhấn Thử lại.', sessionId })}\n\n`)
+        reply.raw.write('data: [DONE]\n\n')
+        reply.raw.end()
+        return
+      }
+      return reply.code(504).send({
+        error: {
+          code: 'AI_TIMEOUT',
+          message: 'Dịch vụ AI phản hồi quá thời gian quy định (Timeout mô phỏng UAT). Vui lòng thử lại.'
+        },
+        sessionId
+      })
+    }
+
+    if (mockFault === 'error') {
+      const sessionId = request.body.sessionId || crypto.randomUUID()
+      if (request.body.stream) {
+        reply.raw.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive'
+        })
+        reply.raw.write(`data: ${JSON.stringify({ type: 'error', code: 'AI_PROVIDER_ERROR', message: 'Dịch vụ AI hiện không sẵn sàng (Lỗi nhà cung cấp mô phỏng UAT). Bạn có thể nhấn Thử lại.', sessionId })}\n\n`)
+        reply.raw.write('data: [DONE]\n\n')
+        reply.raw.end()
+        return
+      }
+      return reply.code(503).send({
+        error: {
+          code: 'AI_PROVIDER_ERROR',
+          message: 'Dịch vụ AI hiện không sẵn sàng (Lỗi nhà cung cấp mô phỏng UAT). Vui lòng thử lại sau giây lát.'
+        },
+        sessionId
+      })
+    }
 
     // Nếu client yêu cầu Server-Sent Events (Streaming)
     if (request.body.stream) {

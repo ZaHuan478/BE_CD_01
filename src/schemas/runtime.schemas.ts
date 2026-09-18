@@ -11,7 +11,7 @@ export const documentParamsSchema = Type.Object({ documentId: Type.String({ minL
 export const catalogQuerySchema = Type.Object({
   q: Type.Optional(Type.String({ maxLength: 200 })),
   moduleId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
-  type: Type.Optional(Type.Union(['procedure', 'policy', 'guide', 'glossary', 'form'].map(value => Type.Literal(value)))),
+  type: Type.Optional(Type.Union(['procedure', 'policy', 'guide', 'glossary', 'form', 'catalog'].map(value => Type.Literal(value)))),
   page: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000000, default: 1 })),
   pageSize: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 20 }))
 }, { additionalProperties: false })

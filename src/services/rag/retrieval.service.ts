@@ -86,7 +86,9 @@ export class RetrievalService {
         // This is the same current-version/effective-date/audience check used by
         // the published library. It runs before any chunk enters the LLM prompt.
         const document = await this.documents.get(readableIds, item.SopId, principal)
-        if (item.SopVersionId !== `v${document.data.version}`) continue
+        const chunkVer = String(item.SopVersionId ?? '').trim().replace(/^v/i, '')
+        const docVer = String(document.data.version ?? '').trim().replace(/^v/i, '')
+        if (chunkVer && docVer && chunkVer !== docVer) continue
         combined.push(item)
       } catch { /* hide inaccessible and stale sources */ }
       if (combined.length >= this.topK) break

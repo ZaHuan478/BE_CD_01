@@ -89,6 +89,18 @@ function convertAggregates(statement: string): string {
   return converted
 }
 
+function convertTextSearch(statement: string): string {
+  let converted = statement.replace(
+    /\bCAST\s*\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s+AS\s+CHAR(?:\s+CHARACTER\s+SET\s+utf8mb4)?\s*\)/gi,
+    'CONVERT(NVARCHAR(MAX), $1)'
+  )
+  converted = converted.replace(
+    /\bCOLLATE\s+utf8mb4_vi_0900_ai_ci\b/gi,
+    'COLLATE Vietnamese_100_CI_AI'
+  )
+  return converted
+}
+
 function convertUpdateJoin(statement: string): string {
   return statement.replace(
     /UPDATE\s+([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s+INNER\s+JOIN\s+([\s\S]+?)\s+SET\s+([\s\S]+?)\s+WHERE\s+/i,
@@ -110,8 +122,19 @@ export function translateSqlServerStatement(statement: string): SqlServerStateme
   converted = converted.replace(/\s+FOR\s+UPDATE\b/gi, '')
   if (lockForUpdate) {
     converted = converted.replace(
-      /\bFROM\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)/i,
-      'FROM $1 WITH (UPDLOCK, ROWLOCK)'
+      /\bFROM\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)(?:\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*))?/i,
+      (match, table, alias) => {
+        const sqlKeywords = new Set([
+          'WHERE', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL', 'CROSS', 'ORDER',
+          'GROUP', 'HAVING', 'LIMIT', 'ON', 'WITH', 'SET', 'UNION'
+        ])
+        if (alias && !sqlKeywords.has(alias.toUpperCase())) {
+          return match.includes(' AS ') || match.includes(' as ')
+            ? `FROM ${table} AS ${alias} WITH (UPDLOCK, ROWLOCK)`
+            : `FROM ${table} ${alias} WITH (UPDLOCK, ROWLOCK)`
+        }
+        return `FROM ${table} WITH (UPDLOCK, ROWLOCK)${alias ? ` ${alias}` : ''}`
+      }
     )
   }
   converted = converted.replace(/\bUTC_TIMESTAMP\s*\(\s*3\s*\)/gi, 'SYSUTCDATETIME()')
@@ -125,6 +148,7 @@ export function translateSqlServerStatement(statement: string): SqlServerStateme
   )
   converted = convertJson(converted)
   converted = convertAggregates(converted)
+  converted = convertTextSearch(converted)
   converted = convertUpdateJoin(converted)
   converted = convertLimits(converted)
   converted = converted.replace(/(?<!:):([A-Za-z_][A-Za-z0-9_]*)/g, '@$1')

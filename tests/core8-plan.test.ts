@@ -10,6 +10,15 @@ function source(): Core8Snapshot {
   } }
 }
 describe('core8 additive migration plan', () => {
+  it('migrates Master Data definitions and governance outside the process library', () => {
+    const snapshot = source()
+    snapshot.tables.AppConfig = [{ ConfigKey: 'ui.dataset.workflow.sopDatabase', ScopeType: 'system', ScopeId: '*', IsActive: 1,
+      ValueJson: JSON.stringify({ 'MODULE-MD': [{ sopCode: 'MD-CAT-01', sopTitle: 'Tỉnh/Thành phố', steps: [{ title: 'Tỉnh/Thành phố' }] }],
+        'MODULE-PLT-MD': [{ sopCode: 'MD-01', sopTitle: 'Thêm mới', steps: [{ title: 'Đề xuất' }, { title: 'Phê duyệt' }] }] }) }]
+    const documents = planCore8(snapshot).documents
+    expect(documents.find(doc => doc.code === 'MD-CAT-01')?.type).toBe('catalog')
+    expect(documents.find(doc => doc.code === 'MD-01')?.type).toBe('guide')
+  })
   it('preserves time-bounded module access without elevating the user', () => {
     const snapshot = source(), before = snapshotHash(snapshot)
     const plan = planCore8(snapshot)

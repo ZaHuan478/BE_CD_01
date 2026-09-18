@@ -177,15 +177,15 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
       await api.register(core8Routes(authService, new Core8Repository(database), moduleRepository))
       await api.register(sopImportRoutes(authService, database, undefined, moduleRepository, env, indexingService))
     } else {
-    const sopRepository = new SopRepository(database)
-    await api.register(sopRoutes(authService, sopRepository, moduleRepository))
-    await api.register(sopImportRoutes(authService, database, sopRepository, moduleRepository, env, indexingService))
+      const sopRepository = new SopRepository(database)
+      await api.register(sopRoutes(authService, sopRepository, moduleRepository))
+      await api.register(sopImportRoutes(authService, database, sopRepository, moduleRepository, env, indexingService))
+      await api.register(knowledgeRoutes(authService, new KnowledgeRepository(database), sopRepository))
+    }
     await api.register(searchRoutes(
       authService,
-      new SearchService(new SearchRepository(database), moduleRepository)
+      new SearchService(new SearchRepository(database, core8), moduleRepository)
     ))
-    await api.register(knowledgeRoutes(authService, new KnowledgeRepository(database), sopRepository))
-    }
     await api.register(accessRoutes(authService, new AccessRepository(database, core8), core8))
     await api.register(administrationRoutes(authService, database, core8))
     await api.register(userDocumentRoutes(authService, database, env))

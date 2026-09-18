@@ -2,6 +2,7 @@ import { conflict, notFound } from '../common/errors.js'
 import { createId } from '../common/ids.js'
 import type { TransactionalDatabase } from '../database/database.js'
 import { contentHash } from '../database/normalize-knowledge.js'
+import { isMasterDataCode, isProcedureDefinition } from '../common/procedure-classification.js'
 import type { CreateSopBody } from '../schemas/sop.schemas.js'
 
 interface ImportRow {
@@ -427,6 +428,12 @@ export class SopImportRepository {
       if (row.Status !== 'needs_review') throw conflict('IMPORT_ALREADY_ACCEPTED', 'Import has already been accepted')
 
       const preview = JSON.parse(row.PreviewJson) as CreateSopBody
+      if (isMasterDataCode(preview.code)) {
+        throw conflict('MASTER_DATA_NOT_PROCEDURE', 'Tài liệu mã MD thuộc Master Data, không được công bố như SOP.')
+      }
+      if (!isProcedureDefinition(preview as unknown as Record<string, unknown>)) {
+        throw conflict('PROCEDURE_STEPS_REQUIRED', 'SOP cần ít nhất hai bước nghiệp vụ khác nhau trước khi gửi duyệt.')
+      }
       for (const moduleId of new Set(preview.moduleIds)) {
         const modules = await runner.query("SELECT ModuleId FROM HrModule WHERE ModuleId = :moduleId AND Status = 'published'", { moduleId })
         if (!modules.length) throw notFound('Module', moduleId)
@@ -580,6 +587,12 @@ export class SopImportRepository {
       }
       const versionNumber = Number(row.TargetVersionId)
       const preview = JSON.parse(row.PreviewJson) as CreateSopBody
+      if (isMasterDataCode(preview.code)) {
+        throw conflict('MASTER_DATA_NOT_PROCEDURE', 'Tài liệu mã MD thuộc Master Data, không được công bố như SOP.')
+      }
+      if (!isProcedureDefinition(preview as unknown as Record<string, unknown>)) {
+        throw conflict('PROCEDURE_STEPS_REQUIRED', 'SOP cần ít nhất hai bước nghiệp vụ khác nhau trước khi công bố.')
+      }
       const documents = await runner.query<{ Status: string; CurrentVersionNumber: number }>(`
         SELECT Status, CurrentVersionNumber FROM KnowledgeDocument WHERE DocumentId = :documentId FOR UPDATE
       `, { documentId: row.TargetSopId })
