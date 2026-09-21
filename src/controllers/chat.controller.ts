@@ -2,6 +2,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { AuthService } from '../services/auth.service.js'
 import type { ChatService } from '../services/chat/chat.service.js'
 import type { ChatCompletionRequest } from '../schemas/rag.schemas.js'
+import { AppError } from '../common/errors.js'
 
 export class ChatController {
   constructor(
@@ -68,8 +69,17 @@ export class ChatController {
         Connection: 'keep-alive'
       })
 
-      for await (const chunk of this.chatService.completeChatStream(principal, request.body)) {
-        reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`)
+      try {
+        for await (const chunk of this.chatService.completeChatStream(principal, request.body)) {
+          reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`)
+        }
+      } catch (error) {
+        const isKnownError = error instanceof AppError
+        const message = isKnownError
+          ? error.message
+          : 'Không thể hoàn tất câu trả lời AI. Vui lòng thử lại sau.'
+        const code = isKnownError ? error.code : 'AI_CHAT_ERROR'
+        reply.raw.write(`data: ${JSON.stringify({ type: 'error', code, message })}\n\n`)
       }
       reply.raw.write(`data: [DONE]\n\n`)
       reply.raw.end()

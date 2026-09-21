@@ -58,9 +58,12 @@ function mapRow(row: ImportRow) {
   }
 }
 
+// Soft-deleting a personal source must not hide its conversion history. The
+// permanent-delete audit entry remains the boundary after which the import is
+// no longer readable.
 const activeSourceCondition = `(job.SourceDocumentId IS NULL OR EXISTS (
   SELECT 1 FROM UserDocument sourceDocument
-  WHERE sourceDocument.DocumentId = job.SourceDocumentId AND sourceDocument.DeletedAt IS NULL
+  WHERE sourceDocument.DocumentId = job.SourceDocumentId
 )) AND NOT EXISTS (
   SELECT 1 FROM AuditLog deletedSource
   WHERE deletedSource.EntityType = 'user-document'
@@ -205,6 +208,42 @@ export class SopImportRepository {
       ORDER BY job.CreatedAt DESC LIMIT 200
     `)
     return rows.map(mapRow)
+  }
+
+  /**
+   * A published import must always point to a live Core8 document. Older test
+   * cleanup paths could delete the target document without updating the import
+   * row, leaving a misleading "published" badge in the conversion screen.
+   * Archive those orphaned imports while preserving the audit trail.
+   */
+  async reconcileMissingTargets(): Promise<number> {
+    const rows = await this.database.query<{ SopImportJobId: string }>(`
+      SELECT job.SopImportJobId FROM SopImportJob job
+      WHERE job.Status IN ('accepted', 'published')
+        AND job.TargetSopId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM KnowledgeDocument documentRow
+          WHERE documentRow.DocumentId = job.TargetSopId
+        )
+    `)
+    for (const row of rows) {
+      await this.database.transaction(async runner => {
+        const result = await runner.query<{ affectedRows: number }>(`
+          UPDATE SopImportJob SET Status = 'archived', UpdatedAt = UTC_TIMESTAMP(3)
+          WHERE SopImportJobId = :id AND Status IN ('accepted', 'published')
+        `, { id: row.SopImportJobId })
+        if (result[0]?.affectedRows) {
+          await runner.query(`
+            INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, AfterJson)
+            VALUES ('sop-import', :id, 'archive-orphaned-target', NULL, :afterJson)
+          `, {
+            id: row.SopImportJobId,
+            afterJson: JSON.stringify({ reason: 'target-knowledge-document-missing' })
+          })
+        }
+      })
+    }
+    return rows.length
   }
 
   async get(id: string) {

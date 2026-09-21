@@ -11,7 +11,7 @@ export function chatRoutes(
   const controller = new ChatController(authService, chatService)
 
   return async (app) => {
-    app.post<{ Body: ChatCompletionRequest }>('/chat/completions', {
+    app.post<{ Body: ChatCompletionRequest; Querystring: { mockFault?: string } }>('/chat/completions', {
       schema: {
         tags: ['AI Chatbot'],
         summary: 'Gửi câu hỏi tới Trợ lý AI và nhận câu trả lời có trích dẫn nguồn (Hỗ trợ SSE streaming)',

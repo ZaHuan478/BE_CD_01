@@ -21,12 +21,14 @@ export function sopImportRoutes(
   sopRepository: SopRepository | undefined,
   moduleRepository: ModuleRepository,
   env: AppEnv,
-  indexingService?: IndexingService
+  indexingService?: IndexingService,
+  providedService?: SopImportService
 ): FastifyPluginAsync {
-  const controller = new SopImportController(auth, new SopImportService(
+  const service = providedService ?? new SopImportService(
     new SopImportRepository(database), new UserDocumentRepository(database),
     sopRepository ? new SopService(sopRepository, moduleRepository) : undefined, env, indexingService
-  ))
+  )
+  const controller = new SopImportController(auth, service)
   return async (app) => {
     app.post<{ Body: CreateDocumentConversionBody }>('/document-conversions', {
       schema: {

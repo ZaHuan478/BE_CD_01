@@ -40,6 +40,7 @@ export class CoreDocumentRepository {
       WHERE DocumentId IN (${rows.map((_, i) => `:d${i}`).join(',')})`, Object.fromEntries(rows.map((row, i) => [`d${i}`, row.DocumentId])))
     return rows.map(row => ({ id: row.DocumentId, code: row.Code, title: row.Title, type: row.DocumentType,
       summary: row.Summary, workflowId: row.WorkflowId, version: row.CurrentVersionNumber,
+      ...(row.CreatedBy !== undefined ? { createdBy: row.CreatedBy } : {}),
       moduleIds: links.filter(link => link.DocumentId === row.DocumentId && moduleIds.includes(link.ModuleId)).map(link => link.ModuleId).sort(),
       ...(row.ContentJson !== undefined ? { content: jsonValue(row.ContentJson) } : {}) }))
   }
@@ -63,7 +64,7 @@ export class CoreDocumentRepository {
     const [count] = await this.database.query<{ Total: number }>(`SELECT COUNT(*) AS Total ${from}`, scope.parameters)
     const page = query.page ?? 1, pageSize = query.pageSize ?? 20
     const rows = await this.database.query<Record<string, any>>(`SELECT d.DocumentId, d.Code, d.Title, d.DocumentType, d.Summary, d.WorkflowId,
-      d.CurrentVersionNumber ${from} ORDER BY d.DocumentId LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`, scope.parameters)
+      d.CurrentVersionNumber, v.CreatedBy ${from} ORDER BY d.DocumentId LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`, scope.parameters)
     // Explicit projection; transitional legacy content columns must not leak into list responses.
     return { data: await this.map(rows.map(({ ContentJson: _content, ...row }) => row), moduleIds), pagination: { page, pageSize, total: Number(count?.Total ?? 0) } }
   }
@@ -72,7 +73,7 @@ export class CoreDocumentRepository {
     const audience = this.audience(principal)
     Object.assign(scope.parameters, audience.parameters)
     const rows = await this.database.query<Record<string, any>>(`SELECT d.DocumentId, d.Code, d.Title, d.DocumentType, d.Summary, d.WorkflowId,
-      d.CurrentVersionNumber, v.ContentJson FROM KnowledgeDocument d ${currentJoin}
+      d.CurrentVersionNumber, v.CreatedBy, v.ContentJson FROM KnowledgeDocument d ${currentJoin}
       WHERE d.DocumentId = :id AND d.Visibility = 'module' AND ${publishedWhere}
         AND (d.DocumentType = 'policy' OR (${scope.sql} AND ${audience.sql}))`, { ...scope.parameters, id })
     if (!rows.length) throw notFound('Document', id)

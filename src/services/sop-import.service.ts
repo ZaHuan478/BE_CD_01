@@ -194,6 +194,7 @@ export class SopImportService {
   }
 
   async list(principal: AuthPrincipal) {
+    if (this.env.databaseModel === 'core8') await this.repository.reconcileMissingTargets()
     if (['ADMIN', 'SUPER_ADMIN'].includes(principal.systemRole)) return this.repository.listAll()
     const items = await this.repository.listForActor(
       principal.accountId,

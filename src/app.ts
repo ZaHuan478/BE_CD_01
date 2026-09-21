@@ -25,6 +25,10 @@ import { moduleRoutes } from './routes/module.routes.js'
 import { SopRepository } from './repositories/sop.repository.js'
 import { sopRoutes } from './routes/sop.routes.js'
 import { sopImportRoutes } from './routes/sop-import.routes.js'
+import { SopImportRepository } from './repositories/sop-import.repository.js'
+import { UserDocumentRepository } from './repositories/user-document.repository.js'
+import { SopImportService } from './services/sop-import.service.js'
+import { SopService } from './services/sop.service.js'
 import { SearchRepository } from './repositories/search.repository.js'
 import { searchRoutes } from './routes/search.routes.js'
 import { SearchService } from './services/search.service.js'
@@ -85,13 +89,46 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
   }
   app.decorateRequest('principal', null)
 
+  const core8 = env.databaseModel === 'core8'
+
   await app.register(swagger, {
     openapi: {
       info: {
-        title: 'HRM SOP API',
-        description: 'Versioned SOP knowledge API backed by MySQL or SQL Server',
+        title: 'HRM SOP Knowledge & AI Platform API',
+        description: `Hệ thống API Quản lý Tri thức Quy trình SOP & Trợ lý AI hỏi đáp RAG [Active DB: ${env.databaseModel} (${(env.database.provider ?? 'mysql').toUpperCase()}) | Auth: ${env.authMode} | RAG: ${env.gemini?.apiKey ? 'Gemini AI' : 'Mock/Local'}]`,
         version: '0.1.0'
       },
+      servers: [
+        { url: '/api/v1', description: 'Business API v1 Prefix' },
+        { url: '/', description: 'Root & Health check endpoints' }
+      ],
+      tags: [
+        { name: 'Core8', description: 'Tài liệu tri thức quy trình & Xác nhận chính sách (Chuẩn Core8 production)' },
+        { name: 'SOP Workspace', description: 'Quản lý vòng đời SOP: bản nháp, revision, phê duyệt, lưu trữ và xóa' },
+        { name: 'SOP imports', description: 'Chuyển đổi và nhập khẩu tài liệu DOCX/PDF sang SOP số hóa' },
+        { name: 'Document conversions', description: 'Tiến trình chuyển đổi tài liệu và lịch sử import' },
+        { name: 'AI Chatbot', description: 'Trợ lý hỏi đáp AI thông minh với RAG, trích dẫn nguồn và quản lý phiên hội thoại' },
+        { name: 'Administration - RAG', description: 'Theo dõi chỉ mục ngữ nghĩa và kích hoạt Re-index tài liệu' },
+        { name: 'Search', description: 'Tra cứu toàn văn tri thức quy trình SOP đa tiêu chí' },
+        { name: 'Knowledge reads', description: 'Truy xuất cấu trúc quy trình, danh mục và bộ dữ liệu UI' },
+        { name: 'Modules', description: 'Quản lý danh mục phân hệ chức năng hệ thống' },
+        { name: 'Identity', description: 'Thông tin tài khoản hiện tại, vai trò và phân quyền menu' },
+        { name: 'Access', description: 'Quản lý tài khoản, người dùng và phân quyền truy cập' },
+        { name: 'Administration', description: 'Cấu hình hệ thống, quản trị phân quyền, gán vai trò SOP và Audit Logs' },
+        { name: 'My documents', description: 'Tài liệu cá nhân của người dùng (tải lên, tra cứu, xem trước)' },
+        { name: 'Administration Documents', description: 'Quản lý kho tài liệu người dùng cấp quản trị viên' },
+        { name: 'System guides', description: 'Hướng dẫn sử dụng hệ thống cho người dùng cuối' },
+        { name: 'Administration - System guides', description: 'Quản lý các bài viết và hướng dẫn sử dụng sản phẩm' },
+        { name: 'System glossary', description: 'Tra cứu thuật ngữ chuyên ngành và từ viết tắt' },
+        { name: 'Administration - System glossary', description: 'Quản lý danh mục thuật ngữ và từ viết tắt' },
+        ...(core8 ? [] : [
+          { name: 'SOPs (Legacy)', description: '[LEGACY] Quản lý SOP theo schema cũ (Chỉ khi DB_MODEL=legacy)' },
+          { name: 'SOP versions (Legacy)', description: '[LEGACY] Quản lý phiên bản SOP schema cũ (Chỉ khi DB_MODEL=legacy)' },
+          { name: 'Knowledge (Legacy)', description: '[LEGACY] Tài liệu tri thức schema cũ (Chỉ khi DB_MODEL=legacy)' },
+          { name: 'Bootstrap (Legacy)', description: '[LEGACY] Khởi tạo tương thích schema cũ (Chỉ khi DB_MODEL=legacy)' },
+          { name: 'Access (Legacy Groups)', description: '[LEGACY] Quản lý nhóm người dùng RBAC schema cũ' }
+        ])
+      ],
       components: {
         securitySchemes: {
           bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
@@ -100,7 +137,14 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
       }
     }
   })
-  await app.register(swaggerUi, { routePrefix: '/docs' })
+  await app.register(swaggerUi, {
+    routePrefix: '/docs',
+    uiConfig: {
+      docExpansion: 'list',
+      deepLinking: true,
+      filter: true
+    }
+  })
 
   app.setNotFoundHandler((request, reply) => {
     void reply.code(404).send({
@@ -152,7 +196,6 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     })
   })
 
-  const core8 = env.databaseModel === 'core8'
   const authRepository = new AuthRepository(database, core8)
   const authService = new AuthService(env, authRepository)
   await app.register(healthRoutes(database))
@@ -173,15 +216,23 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     if (!core8) await api.register(bootstrapRoutes(authService, new BootstrapRepository(database), moduleRepository))
     await api.register(meRoutes(authService, new MeRepository(database, core8), moduleRepository))
     await api.register(moduleRoutes(authService, moduleRepository))
+    let legacySopService: SopService | undefined
     if (core8) {
       await api.register(core8Routes(authService, new Core8Repository(database), moduleRepository))
-      await api.register(sopImportRoutes(authService, database, undefined, moduleRepository, env, indexingService))
     } else {
       const sopRepository = new SopRepository(database)
       await api.register(sopRoutes(authService, sopRepository, moduleRepository))
-      await api.register(sopImportRoutes(authService, database, sopRepository, moduleRepository, env, indexingService))
+      legacySopService = new SopService(sopRepository, moduleRepository)
       await api.register(knowledgeRoutes(authService, new KnowledgeRepository(database), sopRepository))
     }
+    const sopImportService = new SopImportService(
+      new SopImportRepository(database),
+      new UserDocumentRepository(database),
+      legacySopService,
+      env,
+      indexingService
+    )
+    await api.register(sopImportRoutes(authService, database, undefined, moduleRepository, env, indexingService, sopImportService))
     await api.register(searchRoutes(
       authService,
       new SearchService(new SearchRepository(database, core8), moduleRepository)
@@ -192,7 +243,7 @@ export async function buildApp({ env, database }: AppDependencies): Promise<Fast
     await api.register(systemGuideRoutes(authService, new SystemGuideRepository(database)))
     await api.register(systemGlossaryRoutes(authService, new SystemGlossaryRepository(database)))
     // Khởi tạo các services cho AI RAG & Chatbot
-    await api.register(sopWorkspaceRoutes(authService, new SopWorkspaceRepository(database), indexingService))
+    await api.register(sopWorkspaceRoutes(authService, new SopWorkspaceRepository(database), indexingService, sopImportService))
     const retrievalService = new RetrievalService(database, moduleRepository, geminiClient,
       env.rag?.topK ?? 5, env.rag?.similarityThreshold ?? 0.65)
     const chatService = new ChatService(database, retrievalService, geminiClient)

@@ -19,6 +19,25 @@ export interface RagChunkRecord {
   Distance?: number
 }
 
+export interface RagChunkAdminRecord {
+  chunkId: string
+  sopId: string
+  sopVersionId: string
+  sopStepId: string | null
+  moduleId: string
+  moduleIds: string[]
+  isCommon: boolean
+  chunkType: string
+  chunkIndex: number
+  title: string
+  content: string
+  contentHash: string
+  metadata: Record<string, unknown>
+  embeddingPresent: boolean
+  embeddingModel: string | null
+  embeddingDimensions: number | null
+}
+
 export interface IndexStateRecord {
   EntityId: string
   EntityType: string
@@ -246,12 +265,15 @@ export class RagRepository {
     }
   }
 
-  async getIndexOverview(): Promise<{
+  async getIndexOverview(options: { search?: string; page?: number; pageSize?: number } = {}): Promise<{
     totalDocuments: number
     syncedDocuments: number
     pendingDocuments: number
     failedDocuments: number
     totalChunks: number
+    totalItems: number
+    page: number
+    pageSize: number
     items: IndexStateItem[]
     latestJob: null | {
       jobId: string
@@ -268,6 +290,24 @@ export class RagRepository {
       finishedAt: string | null
     }
   }> {
+    const requestedPage = Number(options.page)
+    const requestedPageSize = Number(options.pageSize)
+    const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1
+    const pageSize = Number.isFinite(requestedPageSize)
+      ? Math.min(100, Math.max(1, Math.floor(requestedPageSize)))
+      : 25
+    const offset = (page - 1) * pageSize
+    const itemConditions = ["IndexStatus <> 'stale'"]
+    const itemParameters: DatabaseParameters = { limit: pageSize, offset }
+    if (options.search?.trim()) {
+      itemConditions.push('(EntityId LIKE :indexSearch OR Title LIKE :indexSearch OR ModuleId LIKE :indexSearch OR EntityType LIKE :indexSearch OR IndexStatus LIKE :indexSearch OR EXISTS (SELECT 1 FROM RagChunk chunkSearch WHERE chunkSearch.SopId = IndexDocumentState.EntityId AND (chunkSearch.Title LIKE :indexSearch OR chunkSearch.Content LIKE :indexSearch)))')
+      itemParameters.indexSearch = `%${options.search.trim()}%`
+    }
+    const itemWhere = itemConditions.join(' AND ')
+    const itemPagination = this.database.provider === 'sqlserver'
+      ? 'ORDER BY UpdatedAt DESC OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY'
+      : 'ORDER BY UpdatedAt DESC LIMIT :limit OFFSET :offset'
+
     const [counts] = await this.database.query<{
       TotalDocuments: number
       SyncedDocuments: number
@@ -292,9 +332,13 @@ export class RagRepository {
       )
     `)
 
+    const [itemCount] = await this.database.query<{ TotalItems: number }>(`
+      SELECT COUNT(*) AS TotalItems FROM IndexDocumentState WHERE ${itemWhere}
+    `, itemParameters)
     const rows = await this.database.query<IndexStateRecord>(`
-      SELECT * FROM IndexDocumentState WHERE IndexStatus <> 'stale' ORDER BY UpdatedAt DESC LIMIT 200
-    `)
+      SELECT * FROM IndexDocumentState WHERE ${itemWhere}
+      ${itemPagination}
+    `, itemParameters)
     const [latestJob] = await this.database.query<RagIndexJobRecord>(`
       SELECT * FROM RagIndexJob ORDER BY CreatedAt DESC LIMIT 1
     `)
@@ -305,6 +349,9 @@ export class RagRepository {
       pendingDocuments: Number(counts?.PendingDocuments || 0),
       failedDocuments: Number(counts?.FailedDocuments || 0),
       totalChunks: Number(chunkCount?.TotalChunks || 0),
+      totalItems: Number(itemCount?.TotalItems || 0),
+      page,
+      pageSize,
       latestJob: latestJob ? {
         jobId: latestJob.JobId,
         scope: latestJob.Scope,
@@ -333,6 +380,110 @@ export class RagRepository {
         lastIndexedAt: row.LastIndexedAt?.toISOString() ?? null,
         updatedAt: row.UpdatedAt.toISOString()
       }))
+    }
+  }
+
+  async listChunksForEntity(
+    entityId: string,
+    options: { versionId?: string; query?: string; page?: number; pageSize?: number } = {}
+  ): Promise<{ items: RagChunkAdminRecord[]; total: number; page: number; pageSize: number }> {
+    const requestedPage = Number(options.page)
+    const requestedPageSize = Number(options.pageSize)
+    const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1
+    const pageSize = Number.isFinite(requestedPageSize)
+      ? Math.min(100, Math.max(1, Math.floor(requestedPageSize)))
+      : 25
+    const offset = (page - 1) * pageSize
+    const conditions = ['SopId = :sopId']
+    const parameters: DatabaseParameters = { sopId: entityId, limit: pageSize, offset }
+
+    if (options.versionId) {
+      conditions.push('SopVersionId = :versionId')
+      parameters.versionId = options.versionId
+    }
+    if (options.query?.trim()) {
+      conditions.push('(Title LIKE :chunkQuery OR Content LIKE :chunkQuery OR ChunkType LIKE :chunkQuery)')
+      parameters.chunkQuery = `%${options.query.trim()}%`
+    }
+
+    const where = conditions.join(' AND ')
+    const pagination = this.database.provider === 'sqlserver'
+      ? 'ORDER BY ChunkIndex ASC OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY'
+      : 'ORDER BY ChunkIndex ASC LIMIT :limit OFFSET :offset'
+
+    const [countRows, rows] = await Promise.all([
+      this.database.query<{ Total: number }>(`SELECT COUNT(*) AS Total FROM RagChunk WHERE ${where}`, parameters),
+      this.database.query<RagChunkRecord>(`
+        SELECT RagChunkId, SopId, SopVersionId, SopStepId, ModuleId, ModuleIdsJson, IsCommon,
+               ChunkType, ChunkIndex, Title, Content, ContentHash, MetadataJson,
+               EmbeddingJson, EmbeddingModel
+        FROM RagChunk
+        WHERE ${where}
+        ${pagination}
+      `, parameters)
+    ])
+
+    return {
+      items: rows.map(row => this.toAdminChunk(row)),
+      total: Number(countRows[0]?.Total || 0),
+      page,
+      pageSize
+    }
+  }
+
+  async getChunkForAdmin(chunkId: string): Promise<RagChunkAdminRecord | null> {
+    const top = this.database.provider === 'sqlserver' ? 'TOP 1 ' : ''
+    const suffix = this.database.provider === 'sqlserver' ? '' : ' LIMIT 1'
+    const [row] = await this.database.query<RagChunkRecord>(`
+      SELECT ${top}RagChunkId, SopId, SopVersionId, SopStepId, ModuleId, ModuleIdsJson, IsCommon,
+             ChunkType, ChunkIndex, Title, Content, ContentHash, MetadataJson,
+             EmbeddingJson, EmbeddingModel
+      FROM RagChunk
+      WHERE RagChunkId = :chunkId${suffix}
+    `, { chunkId })
+
+    return row ? this.toAdminChunk(row) : null
+  }
+
+  private toAdminChunk(row: RagChunkRecord): RagChunkAdminRecord {
+    let moduleIds: string[] = []
+    let metadata: Record<string, unknown> = {}
+    let embeddingDimensions: number | null = null
+
+    try {
+      const parsed = row.ModuleIdsJson ? JSON.parse(row.ModuleIdsJson) : []
+      if (Array.isArray(parsed)) moduleIds = parsed.map(String)
+    } catch { /* keep an empty module list for malformed legacy rows */ }
+
+    try {
+      const parsed = row.MetadataJson ? JSON.parse(row.MetadataJson) : {}
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) metadata = parsed
+    } catch { /* keep an empty metadata object for malformed legacy rows */ }
+
+    if (row.EmbeddingJson) {
+      try {
+        const parsed = JSON.parse(String(row.EmbeddingJson))
+        if (Array.isArray(parsed)) embeddingDimensions = parsed.length
+      } catch { /* the admin view reports presence even if a legacy vector is malformed */ }
+    }
+
+    return {
+      chunkId: row.RagChunkId,
+      sopId: row.SopId,
+      sopVersionId: row.SopVersionId,
+      sopStepId: row.SopStepId,
+      moduleId: row.ModuleId,
+      moduleIds,
+      isCommon: Boolean(row.IsCommon),
+      chunkType: row.ChunkType,
+      chunkIndex: Number(row.ChunkIndex),
+      title: row.Title,
+      content: row.Content,
+      contentHash: row.ContentHash,
+      metadata,
+      embeddingPresent: Boolean(row.EmbeddingJson),
+      embeddingModel: row.EmbeddingModel || null,
+      embeddingDimensions
     }
   }
 

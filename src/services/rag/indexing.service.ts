@@ -51,8 +51,19 @@ export class IndexingService {
     this.repository = new RagRepository(database)
   }
 
-  async getOverview() {
-    return this.repository.getIndexOverview()
+  async getOverview(options: { search?: string; page?: number; pageSize?: number } = {}) {
+    return this.repository.getIndexOverview(options)
+  }
+
+  async listChunks(
+    entityId: string,
+    options: { versionId?: string; query?: string; page?: number; pageSize?: number } = {}
+  ) {
+    return this.repository.listChunksForEntity(entityId, options)
+  }
+
+  async getChunk(chunkId: string) {
+    return this.repository.getChunkForAdmin(chunkId)
   }
 
   async enqueueReindex(
@@ -542,9 +553,18 @@ export class IndexingService {
     const embeddingsMap = new Map<string, number[]>()
     if (chunksToEmbed.length > 0 && this.geminiClient.isConfigured()) {
       const texts = chunksToEmbed.map((c) => c.content)
-      const vectors = await this.geminiClient.batchEmbedTexts(texts, 'RETRIEVAL_DOCUMENT')
-      for (let i = 0; i < chunksToEmbed.length; i++) {
-        embeddingsMap.set(chunksToEmbed[i]!.chunkId, vectors[i]!)
+      try {
+        const vectors = await this.geminiClient.batchEmbedTexts(texts, 'RETRIEVAL_DOCUMENT')
+        for (let i = 0; i < chunksToEmbed.length; i++) {
+          embeddingsMap.set(chunksToEmbed[i]!.chunkId, vectors[i]!)
+        }
+      } catch (error) {
+        // Embeddings are an optimization. Keep the document searchable through
+        // the deterministic keyword path when the external provider is down.
+        // The index state still becomes `synced`, and a later re-index can fill
+        // the vector column without losing the published SOP from RAG search.
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`RAG embedding unavailable; persisting keyword-only chunks: ${message}`)
       }
     }
 

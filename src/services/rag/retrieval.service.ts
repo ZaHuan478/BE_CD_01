@@ -64,22 +64,39 @@ export class RetrievalService {
     // 3. Tìm kiếm Từ khóa (Sparse / Keyword Retrieval)
     const keywordResults = await this.repository.searchByKeyword(query, effectiveModuleIds, this.topK)
 
-    // 4. Kết hợp và khử trùng lặp (Hybrid Deduplication)
-    const chunkMap = new Map<string, RagChunkRecord>()
+    // 4. Kết hợp kết quả dense + sparse bằng Reciprocal Rank Fusion (RRF).
+    // RRF giữ được kết quả khớp từ khóa chính xác ngay cả khi embedding không
+    // tốt, đồng thời ưu tiên các chunk xuất hiện cao ở cả hai danh sách.
+    const candidates = new Map<string, {
+      record: RagChunkRecord
+      vectorRank?: number
+      keywordRank?: number
+    }>()
 
-    // Ưu tiên vector results trước
-    for (const item of vectorResults) {
-      chunkMap.set(item.RagChunkId, item)
+    for (const [index, item] of vectorResults.entries()) {
+      if (item.Distance !== undefined && item.Distance > 1 - this.similarityThreshold) continue
+      const candidate = candidates.get(item.RagChunkId) ?? { record: item }
+      candidate.record = item
+      candidate.vectorRank = index + 1
+      candidates.set(item.RagChunkId, candidate)
     }
-    // Bổ sung keyword results nếu chưa có
-    for (const item of keywordResults) {
-      if (!chunkMap.has(item.RagChunkId)) {
-        chunkMap.set(item.RagChunkId, item)
-      }
+    for (const [index, item] of keywordResults.entries()) {
+      const candidate = candidates.get(item.RagChunkId) ?? { record: item }
+      // Keep the vector payload (including distance) when a chunk is present
+      // in both result sets; keyword retrieval only contributes its rank.
+      candidate.keywordRank = index + 1
+      candidates.set(item.RagChunkId, candidate)
     }
 
-    const ranked = Array.from(chunkMap.values())
-      .filter(item => item.Distance === undefined || item.Distance <= 1 - this.similarityThreshold)
+    const rrf = (rank: number | undefined, weight: number) =>
+      rank === undefined ? 0 : weight / (60 + rank)
+    const ranked = Array.from(candidates.values())
+      .sort((left, right) => {
+        const leftScore = rrf(left.vectorRank, 1) + rrf(left.keywordRank, 0.75)
+        const rightScore = rrf(right.vectorRank, 1) + rrf(right.keywordRank, 0.75)
+        return rightScore - leftScore
+      })
+      .map(candidate => candidate.record)
     const combined: RagChunkRecord[] = []
     for (const item of ranked) {
       try {

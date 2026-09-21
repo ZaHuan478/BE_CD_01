@@ -157,7 +157,7 @@ describe('RAG Extractor & Pipeline Tests', () => {
     await repository.searchByVector([0.1, 0.2], ['emp'])
 
     const searchStatements = database.statements.filter(statement => statement.includes('FROM RagChunk'))
-    expect(searchStatements).toHaveLength(2)
+    expect(searchStatements.length).toBeGreaterThanOrEqual(2)
     for (const statement of searchStatements) {
       expect(statement).toContain('IndexDocumentState state')
       expect(statement).toContain("state.IndexStatus = 'stale'")

@@ -36,33 +36,45 @@ export function accessRoutes(authService: AuthService, repository: AccessReposit
       schema: { tags: ['Access'], summary: 'Provision an account', body: createAccountSchema }
     }, (request, reply) => controller.createAccount(request, reply))
 
+    // Legacy RBAC Group routes: only active when DB_MODEL=legacy (!core8).
+    // In Core8 mode, access control is managed via SystemRole and Module permissions.
     if (!core8) {
-    app.put<{ Params: IdParams; Body: ReplaceAccountGroupsBody }>('/accounts/:id/groups', {
-      schema: {
-        tags: ['Access'],
-        summary: 'Replace group memberships for an account',
-        params: idParamsSchema,
-        body: replaceAccountGroupsSchema
-      }
-    }, (request, reply) => controller.replaceAccountGroups(request, reply))
+      app.put<{ Params: IdParams; Body: ReplaceAccountGroupsBody }>('/accounts/:id/groups', {
+        schema: {
+          tags: ['Access (Legacy Groups)'],
+          deprecated: true,
+          summary: 'Replace group memberships for an account (Legacy schema only)',
+          params: idParamsSchema,
+          body: replaceAccountGroupsSchema
+        }
+      }, (request, reply) => controller.replaceAccountGroups(request, reply))
 
-    app.get('/groups', {
-      schema: { tags: ['Access'], summary: 'List groups and grants' }
-    }, (request) => controller.listGroups(request))
+      app.get('/groups', {
+        schema: {
+          tags: ['Access (Legacy Groups)'],
+          deprecated: true,
+          summary: 'List groups and grants (Legacy schema only)'
+        }
+      }, (request) => controller.listGroups(request))
 
-    app.post<{ Body: CreateGroupBody }>('/groups', {
-      schema: { tags: ['Access'], summary: 'Create a user group', body: createGroupSchema }
-    }, (request, reply) => controller.createGroup(request, reply))
+      app.post<{ Body: CreateGroupBody }>('/groups', {
+        schema: {
+          tags: ['Access (Legacy Groups)'],
+          deprecated: true,
+          summary: 'Create a user group (Legacy schema only)',
+          body: createGroupSchema
+        }
+      }, (request, reply) => controller.createGroup(request, reply))
 
-    app.put<{ Params: IdParams; Body: ReplaceGroupGrantsBody }>('/groups/:id/grants', {
-      schema: {
-        tags: ['Access'],
-        summary: 'Replace scoped grants for a group',
-        params: idParamsSchema,
-        body: replaceGroupGrantsSchema
-      }
-    }, (request, reply) => controller.replaceGroupGrants(request, reply))
-
+      app.put<{ Params: IdParams; Body: ReplaceGroupGrantsBody }>('/groups/:id/grants', {
+        schema: {
+          tags: ['Access (Legacy Groups)'],
+          deprecated: true,
+          summary: 'Replace scoped grants for a group (Legacy schema only)',
+          params: idParamsSchema,
+          body: replaceGroupGrantsSchema
+        }
+      }, (request, reply) => controller.replaceGroupGrants(request, reply))
     }
     app.get<{ Querystring: { search?: string } }>('/admin/users', {
       schema: {

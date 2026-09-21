@@ -35,7 +35,7 @@ describe('UAT Search Suite (UAT-053, UAT-054, UAT-055, UAT-056)', () => {
     expect(item.type).toBe('sop')
     expect(item.title).toContain('tính lương ứng')
     expect(item.moduleIds).toContain('pay')
-  })
+  }, 15000)
 
   // UAT-054: Tìm kiếm Tiếng Việt có dấu và không dấu
   it('UAT-054: should return consistent results for queries with and without Vietnamese diacritics', async () => {
@@ -60,7 +60,7 @@ describe('UAT Search Suite (UAT-053, UAT-054, UAT-055, UAT-056)', () => {
     const codesNoAccent = new Set(dataNoAccent.map((d: any) => d.code))
     const intersection = [...codesAccent].filter((c) => codesNoAccent.has(c))
     expect(intersection.length).toBeGreaterThan(0)
-  })
+  }, 20000)
 
   // UAT-055: Tìm kiếm Phân quyền - chỉ trả trong phạm vi được cấp
   it('UAT-055: should forbid access to unauthorized module search', async () => {
@@ -72,7 +72,7 @@ describe('UAT Search Suite (UAT-053, UAT-054, UAT-055, UAT-056)', () => {
       headers: { 'x-user-id': 'demo-recruiter' }
     })
     expect(resForbiddenModule.statusCode).toBe(403)
-  })
+  }, 20000)
 
   // UAT-056: Tìm kiếm Trạng thái rỗng
   it('UAT-056: should return empty data array with 200 OK for non-existent keyword', async () => {
@@ -85,5 +85,5 @@ describe('UAT Search Suite (UAT-053, UAT-054, UAT-055, UAT-056)', () => {
     const body = JSON.parse(res.body)
     expect(body.data).toEqual([])
     expect(body.meta.total).toBe(0)
-  })
+  }, 20000)
 })

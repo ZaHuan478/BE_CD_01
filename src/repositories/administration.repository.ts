@@ -1,6 +1,6 @@
 import { conflict, notFound } from '../common/errors.js'
 import { createId } from '../common/ids.js'
-import type { TransactionalDatabase } from '../database/database.js'
+import type { QueryRunner, TransactionalDatabase } from '../database/database.js'
 import type { AuditQuery, CreateProfileBody, ReplaceSopRolesBody, SystemSettings, UpdateProfileBody } from '../schemas/administration.schemas.js'
 
 const defaultSettings: SystemSettings = {

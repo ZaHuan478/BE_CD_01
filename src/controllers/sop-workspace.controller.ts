@@ -38,4 +38,22 @@ export class SopWorkspaceController {
     const result = await this.service.action(principal, request.params.id, request.body.revision, request.body.action, request.body.note)
     return { data: result }
   }
+
+  async archiveDocument(request: FastifyRequest<{ Params: { documentId: string }; Body: { reason: string; expectedVersion: number } }>) {
+    const principal = await this.auth.authenticate(request)
+    const result = await this.service.archivePublishedDocument(
+      principal,
+      request.params.documentId,
+      request.body.reason,
+      request.body.expectedVersion
+    )
+    return { data: result }
+  }
+
+  async permanentDelete(request: FastifyRequest<{ Params: { id: string }; Querystring: { confirmCode?: string }; Body?: { confirmCode?: string } }>) {
+    const principal = await this.auth.authenticate(request)
+    const confirmCode = request.body?.confirmCode ?? request.query?.confirmCode ?? ''
+    const result = await this.service.permanentDelete(principal, request.params.id, confirmCode)
+    return { data: result }
+  }
 }

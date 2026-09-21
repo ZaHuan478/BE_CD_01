@@ -14,6 +14,10 @@ const policyParamsSchema = Type.Object({
 })
 const policyBodySchema = Type.Object({ acknowledged: Type.Boolean() })
 
+/**
+ * [LEGACY: DEPRECATED - Only mounted when DB_MODEL=legacy]
+ * Khi DB_MODEL=core8, các endpoint này được thay thế hoàn toàn bởi core8Routes và runtimeRoutes.
+ */
 export function bootstrapRoutes(
   authService: AuthService,
   repository: BootstrapRepository,
@@ -23,21 +27,23 @@ export function bootstrapRoutes(
   return async (app) => {
 
     app.get('/bootstrap', {
-      schema: { tags: ['Frontend'], deprecated: true, summary: 'Legacy compatibility only; use incremental knowledge reads' }
+      schema: { tags: ['Bootstrap (Legacy)'], deprecated: true, summary: 'Legacy compatibility only; use incremental knowledge reads' }
     }, (request) => controller.get(request))
 
     app.get<{ Params: PolicyParams }>('/policy-acknowledgements/:policyId', {
       schema: {
-        tags: ['Frontend'],
-        summary: 'Get the current account policy acknowledgement',
+        tags: ['Bootstrap (Legacy)'],
+        deprecated: true,
+        summary: 'Get the current account policy acknowledgement (Legacy fallback)',
         params: policyParamsSchema
       }
     }, (request) => controller.acknowledgement(request))
 
     app.put<{ Params: PolicyParams; Body: PolicyBody }>('/policy-acknowledgements/:policyId', {
       schema: {
-        tags: ['Frontend'],
-        summary: 'Set the current account policy acknowledgement',
+        tags: ['Bootstrap (Legacy)'],
+        deprecated: true,
+        summary: 'Set the current account policy acknowledgement (Legacy fallback)',
         params: policyParamsSchema,
         body: policyBodySchema
       }

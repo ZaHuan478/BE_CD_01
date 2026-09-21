@@ -13,7 +13,7 @@ export class AccessRepository {
 
   async listPermissions() {
     if (this.core8) return [
-      'sop.read', 'sop.create', 'sop.edit', 'sop.review', 'sop.publish', 'sop.archive',
+      'sop.read', 'sop.create', 'sop.edit', 'sop.review', 'sop.publish', 'sop.archive', 'sop.delete',
       'module.manage', 'knowledge.manage', 'rag.manage', 'audit.read', 'user.read',
       'user.manage', 'permission.manage', 'settings.manage'
     ].map(permissionCode => ({ permissionCode, permissionName: permissionCode, description: null }))

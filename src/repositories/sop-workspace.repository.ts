@@ -26,13 +26,25 @@ export interface DraftRow {
 export class SopWorkspaceRepository {
   constructor(private readonly db: TransactionalDatabase) {}
 
+  get provider(): TransactionalDatabase['provider'] {
+    return this.db.provider
+  }
+
+  private lock(alias: string): string {
+    return this.db.provider === 'sqlserver' ? `${alias} WITH (UPDLOCK, ROWLOCK)` : alias
+  }
+
+  private forUpdate(): string {
+    return this.db.provider === 'sqlserver' ? '' : ' FOR UPDATE'
+  }
+
   async list(): Promise<DraftRow[]> {
     return this.db.query<DraftRow>('SELECT * FROM SopWorkspaceDraft ORDER BY UpdatedAt DESC')
   }
 
   async findDraftById(id: string, lock = false, runner: QueryRunner = this.db): Promise<DraftRow | null> {
     const [row] = await runner.query<DraftRow>(
-      `SELECT * FROM SopWorkspaceDraft WHERE DraftId = :id ${lock ? 'FOR UPDATE' : ''}`,
+      `SELECT ${this.db.provider === 'sqlserver' ? 'TOP 1 ' : ''}* FROM ${this.lock('SopWorkspaceDraft')} WHERE DraftId = :id${lock ? this.forUpdate() : ''}`,
       { id }
     )
     return row ?? null
@@ -55,10 +67,10 @@ export class SopWorkspaceRepository {
       CurrentVersionNumber: number
       ContentJson: unknown
     }>(
-      `SELECT d.*, v.ContentJson
-       FROM KnowledgeDocument d
+      `SELECT ${this.db.provider === 'sqlserver' ? 'TOP 1 ' : ''}d.*, v.ContentJson
+       FROM ${this.lock('KnowledgeDocument d')}
        JOIN KnowledgeDocumentVersion v ON v.DocumentId = d.DocumentId AND v.VersionNumber = d.CurrentVersionNumber
-       WHERE d.DocumentId = :id AND d.Visibility = 'module' AND d.DocumentType = 'procedure' FOR UPDATE`,
+       WHERE d.DocumentId = :id AND d.Visibility = 'module' AND d.DocumentType = 'procedure'${this.forUpdate()}`,
       { id }
     )
     return doc ?? null
@@ -145,7 +157,7 @@ export class SopWorkspaceRepository {
 
     if (documentId) {
       const [doc] = await runner.query<{ CurrentVersionNumber: number }>(
-        'SELECT CurrentVersionNumber FROM KnowledgeDocument WHERE DocumentId = :id FOR UPDATE',
+        `SELECT ${this.db.provider === 'sqlserver' ? 'TOP 1 ' : ''}CurrentVersionNumber FROM ${this.lock('KnowledgeDocument')} WHERE DocumentId = :id${this.forUpdate()}`,
         { id: documentId }
       )
       if (!doc || doc.CurrentVersionNumber !== params.baseVersion) {
@@ -154,7 +166,7 @@ export class SopWorkspaceRepository {
     } else {
       documentId = createId('doc')
       const duplicate = await runner.query(
-        'SELECT DocumentId FROM KnowledgeDocument WHERE Code = :code FOR UPDATE',
+        `SELECT ${this.db.provider === 'sqlserver' ? 'TOP 1 ' : ''}DocumentId FROM ${this.lock('KnowledgeDocument')} WHERE Code = :code${this.forUpdate()}`,
         { code: params.code }
       )
       if (duplicate.length) throw conflict('SOP_CODE_EXISTS', 'Mã SOP đã tồn tại; hãy sửa SOP hiện có hoặc đổi mã')
@@ -198,7 +210,7 @@ export class SopWorkspaceRepository {
 
   async archiveDocument(documentId: string, baseVersion: number, runner: QueryRunner = this.db): Promise<void> {
     const [doc] = await runner.query<{ CurrentVersionNumber: number }>(
-      'SELECT CurrentVersionNumber FROM KnowledgeDocument WHERE DocumentId = :id FOR UPDATE',
+      `SELECT ${this.db.provider === 'sqlserver' ? 'TOP 1 ' : ''}CurrentVersionNumber FROM ${this.lock('KnowledgeDocument')} WHERE DocumentId = :id${this.forUpdate()}`,
       { id: documentId }
     )
     if (doc?.CurrentVersionNumber !== baseVersion) {
@@ -229,5 +241,17 @@ export class SopWorkspaceRepository {
         note: params.note
       }
     )
+  }
+
+  async findDraftByDocumentId(documentId: string, runner: QueryRunner = this.db): Promise<DraftRow | null> {
+    const [row] = await runner.query<DraftRow>(
+      `SELECT ${this.db.provider === 'sqlserver' ? 'TOP 1 ' : ''}* FROM ${this.lock('SopWorkspaceDraft')} WHERE DocumentId = :id ORDER BY UpdatedAt DESC${this.db.provider === 'sqlserver' ? '' : ' LIMIT 1'}`,
+      { id: documentId }
+    )
+    return row ?? null
+  }
+
+  async deleteDraft(id: string, runner: QueryRunner = this.db): Promise<void> {
+    await runner.query('DELETE FROM SopWorkspaceDraft WHERE DraftId = :id', { id })
   }
 }

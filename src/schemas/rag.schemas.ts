@@ -26,6 +26,9 @@ export const indexOverviewSchema = Type.Object({
   pendingDocuments: Type.Integer(),
   failedDocuments: Type.Integer(),
   totalChunks: Type.Integer(),
+  totalItems: Type.Integer(),
+  page: Type.Integer(),
+  pageSize: Type.Integer(),
   items: Type.Array(indexStatusItemSchema),
   latestJob: Type.Union([Type.Null(), Type.Object({
     jobId: Type.String(),
@@ -68,6 +71,28 @@ export const citationSchema = Type.Object({
 
 export type Citation = Static<typeof citationSchema>
 
+export const chatIntentSchema = Type.Union([
+  Type.Literal('SOP_LOOKUP'),
+  Type.Literal('HOW_TO'),
+  Type.Literal('RESPONSIBILITY'),
+  Type.Literal('DEADLINE_LOOKUP'),
+  Type.Literal('FORM_LOOKUP'),
+  Type.Literal('SOP_STATUS'),
+  Type.Literal('NAVIGATION'),
+  Type.Literal('OUT_OF_SCOPE')
+])
+
+export const chatActionSchema = Type.Object({
+  type: Type.Literal('OPEN_SOP'),
+  label: Type.String(),
+  routeUrl: Type.String(),
+  sopId: Type.String(),
+  stepId: Type.Optional(Type.String())
+})
+
+export type ChatIntent = Static<typeof chatIntentSchema>
+export type ChatAction = Static<typeof chatActionSchema>
+
 export const chatCompletionRequestSchema = Type.Object({
   message: Type.String({ minLength: 1, maxLength: 2000 }),
   sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
@@ -80,7 +105,9 @@ export type ChatCompletionRequest = Static<typeof chatCompletionRequestSchema>
 export const chatCompletionResponseSchema = Type.Object({
   sessionId: Type.String(),
   message: Type.String(),
-  citations: Type.Array(citationSchema)
+  citations: Type.Array(citationSchema),
+  intent: chatIntentSchema,
+  actions: Type.Array(chatActionSchema)
 })
 
 export type ChatCompletionResponse = Static<typeof chatCompletionResponseSchema>

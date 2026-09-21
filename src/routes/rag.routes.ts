@@ -11,7 +11,7 @@ export function ragRoutes(
   const controller = new RagController(authService, indexingService)
 
   return async (app) => {
-    app.get('/admin/rag/status', {
+    app.get<{ Querystring: { search?: string; query?: string; page?: string; pageSize?: string } }>('/admin/rag/status', {
       schema: {
         tags: ['Administration - RAG'],
         summary: 'Xem trạng thái và tổng quan chỉ mục ngữ nghĩa (Admin-only)'
@@ -25,5 +25,22 @@ export function ragRoutes(
         body: reindexRequestSchema
       }
     }, (request, reply) => controller.triggerReindex(request, reply))
+
+    app.get<{
+      Params: { entityId: string }
+      Querystring: { versionId?: string; query?: string; search?: string; page?: string; pageSize?: string }
+    }>('/admin/rag/entities/:entityId/chunks', {
+      schema: {
+        tags: ['Administration - RAG'],
+        summary: 'Xem các chunk của một SOP hoặc tài liệu (Admin-only)'
+      }
+    }, (request) => controller.listChunks(request))
+
+    app.get<{ Params: { chunkId: string } }>('/admin/rag/chunks/:chunkId', {
+      schema: {
+        tags: ['Administration - RAG'],
+        summary: 'Xem chi tiết một chunk RAG (Admin-only)'
+      }
+    }, (request) => controller.getChunk(request))
   }
 }

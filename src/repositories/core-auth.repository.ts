@@ -2,7 +2,7 @@ import type { QueryRunner } from '../database/database.js'
 import type { AuthPrincipal, PrincipalGrant } from '../auth/types.js'
 
 const adminPermissions = ['sop.read', 'sop.create', 'sop.edit', 'sop.review', 'sop.publish', 'sop.archive', 'module.manage', 'knowledge.manage', 'rag.manage', 'audit.read', 'user.read']
-const superAdminPermissions = [...adminPermissions, 'user.manage', 'permission.manage', 'settings.manage']
+const superAdminPermissions = [...adminPermissions, 'user.manage', 'permission.manage', 'settings.manage', 'sop.delete']
 const sopRolePermissions: Record<string, string[]> = {
   VIEWER: ['sop.read'],
   OWNER: ['sop.read', 'sop.create', 'sop.edit'],

@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import type { AuthService } from '../services/auth.service.js'
 import type { IndexingService } from '../services/rag/indexing.service.js'
-import { forbidden } from '../common/errors.js'
+import { forbidden, notFound } from '../common/errors.js'
 import { hasPermission } from '../auth/authorization.js'
 import type { ReindexRequest } from '../schemas/rag.schemas.js'
 
@@ -22,10 +22,17 @@ export class RagController {
     }
   }
 
-  async getStatus(request: FastifyRequest) {
+  async getStatus(request: FastifyRequest<{
+    Querystring: { search?: string; query?: string; page?: string; pageSize?: string }
+  }>) {
     const principal = await this.auth.authenticate(request)
     this.assertAdmin(principal)
-    const data = await this.indexingService.getOverview()
+    const query = request.query || {}
+    const data = await this.indexingService.getOverview({
+      search: query.search ?? query.query,
+      page: Number(query.page || 1),
+      pageSize: Number(query.pageSize || 25)
+    })
     return { data, requestId: request.id }
   }
 
@@ -45,5 +52,31 @@ export class RagController {
       },
       requestId: request.id
     })
+  }
+
+  async listChunks(request: FastifyRequest<{
+    Params: { entityId: string }
+    Querystring: { versionId?: string; query?: string; search?: string; page?: string; pageSize?: string }
+  }>) {
+    const principal = await this.auth.authenticate(request)
+    this.assertAdmin(principal)
+
+    const query = request.query || {}
+    const data = await this.indexingService.listChunks(request.params.entityId, {
+      versionId: query.versionId,
+      query: query.query ?? query.search,
+      page: Number(query.page || 1),
+      pageSize: Number(query.pageSize || 25)
+    })
+    return { data, requestId: request.id }
+  }
+
+  async getChunk(request: FastifyRequest<{ Params: { chunkId: string } }>) {
+    const principal = await this.auth.authenticate(request)
+    this.assertAdmin(principal)
+
+    const data = await this.indexingService.getChunk(request.params.chunkId)
+    if (!data) throw notFound('RAG chunk', request.params.chunkId)
+    return { data, requestId: request.id }
   }
 }

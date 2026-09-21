@@ -6,8 +6,9 @@ import { RetrievalService } from '../rag/retrieval.service.js'
 import { GeminiClient, type ChatMessageInput } from '../rag/gemini.client.js'
 import { PromptBuilder } from './prompt.builder.js'
 import { CitationParser } from './citation.parser.js'
-import type { ChatCompletionRequest, ChatCompletionResponse } from '../../schemas/rag.schemas.js'
+import type { ChatAction, ChatCompletionRequest, ChatCompletionResponse, Citation } from '../../schemas/rag.schemas.js'
 import { forbidden } from '../../common/errors.js'
+import { classifyChatIntent, type ChatIntent } from './intent.router.js'
 
 export class ChatService {
   private readonly chatRepository: ChatRepository
@@ -20,6 +21,40 @@ export class ChatService {
     private readonly geminiClient: GeminiClient
   ) {
     this.chatRepository = new ChatRepository(database)
+  }
+
+  /**
+   * Keep the assistant useful when the external LLM is unavailable. This is
+   * deliberately extractive: it only returns text already retrieved through
+   * the RBAC- and version-filtered RAG pipeline, and appends source tags so
+   * citations remain available to the user.
+   */
+  private buildGroundedFallback(contextChunks: Array<{ chunkId: string; title: string; content: string }>): string {
+    const sources = contextChunks.slice(0, 3).map((chunk) => {
+      const excerpt = chunk.content.trim().slice(0, 720)
+      return `- ${chunk.title}: ${excerpt} [SOURCE_ID:${chunk.chunkId}]`
+    })
+    return [
+      'Dịch vụ AI bên ngoài hiện không khả dụng; dưới đây là nội dung trích xuất trực tiếp từ các SOP bạn được phép xem:',
+      ...sources
+    ].join('\n')
+  }
+
+  private buildActions(citations: Citation[], intent: ChatIntent): ChatAction[] {
+    if (intent === 'OUT_OF_SCOPE') return []
+    return citations.slice(0, 3).map(citation => ({
+      type: 'OPEN_SOP' as const,
+      label: citation.stepTitle
+        ? `${citation.stepCode ? `${citation.stepCode}: ` : ''}${citation.stepTitle}`
+        : citation.sopTitle,
+      routeUrl: citation.routeUrl,
+      sopId: citation.sopId,
+      ...(citation.stepId ? { stepId: citation.stepId } : {})
+    }))
+  }
+
+  private buildOutOfScopeReply(): string {
+    return 'Tôi là trợ lý AI của iSOP, hỗ trợ tra cứu quy trình, chính sách, biểu mẫu, người chịu trách nhiệm và thời hạn xử lý. Câu hỏi hiện tại nằm ngoài phạm vi dữ liệu SOP được cấp phép.'
   }
 
   async listSessions(principal: AuthPrincipal) {
@@ -37,7 +72,7 @@ export class ChatService {
     if (!session) throw forbidden('Không tìm thấy phiên trò chuyện hoặc bạn không có quyền xem.')
 
     const rows = await this.chatRepository.getMessages(sessionId)
-    return Promise.all(rows.map(async (m) => {
+    return Promise.all(rows.map(async (m, rowIndex) => {
       let citations = []
       if (m.CitationsJson) {
         try {
@@ -59,11 +94,21 @@ export class ChatService {
           }
         }
       }
+      const previousUserMessage = rows.slice(0, rowIndex)
+        .reverse()
+        .find(row => row.Role === 'user')
+      const messageIntent = classifyChatIntent(previousUserMessage?.Content || m.Content)
       return {
         messageId: m.MessageId,
         role: m.Role,
         content: m.Content,
         citations,
+        ...(m.Role === 'assistant'
+          ? {
+              intent: messageIntent,
+              actions: this.buildActions(citations, messageIntent)
+            }
+          : {}),
         createdAt: m.CreatedAt.toISOString()
       }
     }))
@@ -78,6 +123,7 @@ export class ChatService {
     request: ChatCompletionRequest
   ): Promise<ChatCompletionResponse> {
     const sessionId = request.sessionId || crypto.randomUUID()
+    const intent = classifyChatIntent(request.message)
 
     // Đảm bảo session tồn tại
     const owner = await this.chatRepository.getSessionOwner(sessionId)
@@ -105,18 +151,18 @@ export class ChatService {
     }))
 
     // 3. Tìm kiếm ngữ cảnh phù hợp (đã qua lọc quyền RBAC)
-    const contextChunks = await this.retrievalService.retrieveRelevantChunks(
-      principal,
-      request.message,
-      request.moduleId
-    )
+    const contextChunks = intent === 'OUT_OF_SCOPE'
+      ? []
+      : await this.retrievalService.retrieveRelevantChunks(principal, request.message, request.moduleId)
 
     // 4. Xây dựng System Instruction & Ngữ cảnh
     const systemInstruction = this.promptBuilder.buildSystemInstruction(contextChunks)
 
     // 5. Gọi Google Gemini sinh câu trả lời
     let rawAnswer = ''
-    if (contextChunks.length === 0) {
+    if (intent === 'OUT_OF_SCOPE') {
+      rawAnswer = this.buildOutOfScopeReply()
+    } else if (contextChunks.length === 0) {
       rawAnswer = 'Hiện tại trong các quy trình bạn được phép truy cập chưa có hướng dẫn cụ thể về vấn đề này.'
     } else if (this.geminiClient.isConfigured()) {
       try {
@@ -124,10 +170,10 @@ export class ChatService {
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Lỗi gọi Gemini generateChat:', errMsg)
-        rawAnswer = 'Xin lỗi, hiện tại hệ thống AI đang quá tải hoặc gặp sự cố kết nối. Vui lòng thử lại sau giây lát.'
+        rawAnswer = this.buildGroundedFallback(contextChunks)
       }
     } else {
-      rawAnswer = 'Trợ lý AI chưa được cấu hình. Vui lòng liên hệ quản trị viên.'
+      rawAnswer = this.buildGroundedFallback(contextChunks)
     }
 
     // 6. Bóc tách và định dạng trích dẫn nguồn
@@ -143,18 +189,31 @@ export class ChatService {
       citations
     })
 
+    const actions = this.buildActions(citations, intent)
     return {
       sessionId,
       message: cleanText,
-      citations
+      citations,
+      intent,
+      actions
     }
   }
 
   async *completeChatStream(
     principal: AuthPrincipal,
     request: ChatCompletionRequest
-  ): AsyncGenerator<{ type: 'token' | 'done'; token?: string; citations?: unknown; sessionId?: string }, void, unknown> {
+  ): AsyncGenerator<{
+    type: 'progress' | 'token' | 'done'
+    stage?: 'retrieving' | 'generating' | 'saving'
+    message?: string
+    token?: string
+    citations?: Citation[]
+    actions?: ChatAction[]
+    intent?: ChatIntent
+    sessionId?: string
+  }, void, unknown> {
     const sessionId = request.sessionId || crypto.randomUUID()
+    const intent = classifyChatIntent(request.message)
 
     const owner = await this.chatRepository.getSessionOwner(sessionId)
     if (owner && owner !== principal.accountId) throw forbidden('Không tìm thấy phiên trò chuyện hoặc bạn không có quyền xem.')
@@ -178,11 +237,17 @@ export class ChatService {
       text: h.Content
     }))
 
-    const contextChunks = await this.retrievalService.retrieveRelevantChunks(
-      principal,
-      request.message,
-      request.moduleId
-    )
+    const contextChunks = intent === 'OUT_OF_SCOPE'
+      ? []
+      : await this.retrievalService.retrieveRelevantChunks(principal, request.message, request.moduleId)
+
+    yield {
+      type: 'progress',
+      stage: 'retrieving',
+      message: contextChunks.length
+        ? `Đã tìm thấy ${contextChunks.length} nguồn phù hợp trong phạm vi quyền truy cập.`
+        : 'Chưa tìm thấy nguồn phù hợp trong phạm vi quyền truy cập.'
+    }
 
     const systemInstruction = this.promptBuilder.buildSystemInstruction(contextChunks)
 
@@ -200,10 +265,14 @@ export class ChatService {
       emittedLength = safe.length
       return token
     }
-    if (contextChunks.length === 0) {
+    if (intent === 'OUT_OF_SCOPE') {
+      fullRawText = this.buildOutOfScopeReply()
+      yield { type: 'token', token: emitNewText(fullRawText) }
+    } else if (contextChunks.length === 0) {
       fullRawText = 'Hiện tại trong các quy trình bạn được phép truy cập chưa có hướng dẫn cụ thể về vấn đề này.'
       yield { type: 'token', token: emitNewText(fullRawText) }
     } else if (this.geminiClient.isConfigured()) {
+      yield { type: 'progress', stage: 'generating', message: 'Đang tổng hợp câu trả lời có dẫn chứng.' }
       try {
         for await (const chunk of this.geminiClient.generateChatStream(systemInstruction, chatHistory)) {
           fullRawText += chunk
@@ -212,13 +281,16 @@ export class ChatService {
         }
       } catch (err) {
         console.error('Lỗi stream:', err)
-        const interruption = ' (Có lỗi gián đoạn kết nối streaming)'
-        fullRawText += interruption
+        const fallback = this.buildGroundedFallback(contextChunks)
+        // Some provider tokens may already have reached the client. Append the
+        // extractive fallback instead of replacing the prefix, otherwise the
+        // client-side cursor would skip the beginning of the fallback text.
+        fullRawText = fullRawText.trim() ? `${fullRawText}\n\n${fallback}` : fallback
         const token = emitNewText(fullRawText)
         if (token) yield { type: 'token', token }
       }
     } else {
-      fullRawText = 'Trợ lý AI chưa được cấu hình. Vui lòng liên hệ quản trị viên.'
+      fullRawText = this.buildGroundedFallback(contextChunks)
       yield { type: 'token', token: emitNewText(fullRawText) }
     }
 
@@ -235,6 +307,8 @@ export class ChatService {
       citations
     })
 
-    yield { type: 'done', citations, sessionId }
+    const actions = this.buildActions(citations, intent)
+    yield { type: 'progress', stage: 'saving', message: 'Đã lưu câu trả lời vào phiên trò chuyện.' }
+    yield { type: 'done', citations, actions, intent, sessionId }
   }
 }

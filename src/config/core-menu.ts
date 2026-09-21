@@ -6,7 +6,6 @@ const coreMenuEntries: Array<[string, string, string, string, string | null]> = 
   ['layer-1-master-data', 'Dữ liệu nền tảng', '/employee-lifecycle/masterdata', 'Database', 'sop.read'],
   ['layer-2-lifecycle', 'Vòng đời nhân sự', '/employee-lifecycle/journey', 'Layers', 'sop.read'],
   ['layer-3-operations', 'Vận hành', '/employee-lifecycle/operations', 'GitBranch', 'sop.read'],
-  ['system-support', 'Hỗ trợ hệ thống', '/employee-lifecycle/operations', 'Settings', 'sop.read'],
   ['process-library', 'Thư viện quy trình', '/employee-lifecycle?tab=process-library&cluster=core', 'BookOpen', 'sop.read'],
   ['policy-center', 'Quy định & Tuân thủ', '/employee-lifecycle/policies', 'ShieldCheck', null],
   ['ADMIN', 'Quản trị', '/employee-lifecycle/admin', 'Users', 'permission.manage']

@@ -1,7 +1,7 @@
 import { createId } from '../common/ids.js'
 import { conflict, forbidden, notFound } from '../common/errors.js'
 import type { AuthPrincipal } from '../auth/types.js'
-import { canAccessSop } from '../auth/authorization.js'
+import { canAccessSop, hasPermission } from '../auth/authorization.js'
 import { jsonValue } from '../repositories/core-document.repository.js'
 import type { CreateSopBody } from '../schemas/sop.schemas.js'
 import { validateGraph } from './sop.service.js'
@@ -12,10 +12,11 @@ import {
   type State
 } from '../repositories/sop-workspace.repository.js'
 import type { IndexingService } from './rag/indexing.service.js'
+import type { SopImportService } from './sop-import.service.js'
 
 export type { Action, DraftRow, State }
 
-const elevated = (p: AuthPrincipal) => ['ADMIN', 'SUPER_ADMIN'].includes(p.systemRole)
+const elevated = (p: AuthPrincipal) => p.systemRole === 'SUPER_ADMIN'
 
 export function mayManageDraft(p: AuthPrincipal, permission: string, documentId: string | null, modules: string[]) {
   return elevated(p) || canAccessSop(p, permission, documentId ?? '', modules)
@@ -90,7 +91,8 @@ export function workspacePreview(doc: { Code: string; Title: string; Summary: st
 export class SopWorkspaceService {
   constructor(
     private readonly repository: SopWorkspaceRepository,
-    private readonly indexingService?: IndexingService
+    private readonly indexingService?: IndexingService,
+    private readonly importService?: SopImportService
   ) {}
 
   private preview(row: DraftRow): CreateSopBody {
@@ -103,6 +105,56 @@ export class SopWorkspaceService {
 
   private visible(p: AuthPrincipal, row: DraftRow) {
     return this.editable(p, row) || ['sop.review', 'sop.publish'].some(permission => mayManageDraft(p, permission, row.DocumentId, this.preview(row).moduleIds))
+  }
+
+  private importState(status: 'needs_review' | 'accepted' | 'published' | 'failed' | 'archived'): State {
+    if (status === 'accepted' || status === 'published' || status === 'archived') return status === 'accepted' ? 'submitted' : status
+    return 'draft'
+  }
+
+  private importOutput(p: AuthPrincipal, item: Awaited<ReturnType<SopImportService['get']>>) {
+    const state = item.status === 'accepted' && item.reviewedAt ? 'reviewed' : this.importState(item.status)
+    const independent = item.createdBy !== p.accountId
+    const canReview = hasPermission(p, 'sop.review') || Boolean(item.targetSopId && hasPermission(p, 'sop.review', 'sop', item.targetSopId))
+    const canPublish = hasPermission(p, 'sop.publish') || Boolean(item.targetSopId && hasPermission(p, 'sop.publish', 'sop', item.targetSopId))
+    const owner = item.createdBy === p.accountId
+    return {
+      id: item.id,
+      source: 'import' as const,
+      documentId: item.targetSopId,
+      baseVersion: Number(item.targetVersionId ?? 0),
+      revision: 1,
+      state,
+      preview: item.preview,
+      createdBy: item.createdBy,
+      editedBy: item.createdBy,
+      reviewedBy: item.reviewedBy,
+      publishedBy: null,
+      note: item.reviewNote,
+      updatedAt: item.updatedAt,
+      permissions: {
+        // A published import is immutable in place, but its owner may still
+        // create a new revision after it has been archived.  Expose that
+        // capability through the shared workspace contract so the UI does not
+        // strand an archived conversion in a read-only state.
+        edit: owner && ['needs_review', 'archived'].includes(item.status),
+        review: canReview && independent && item.status === 'accepted' && !item.reviewedAt,
+        publish: canPublish && independent && item.status === 'accepted' && Boolean(item.reviewedAt),
+        reject: false,
+        archive: owner || hasPermission(p, 'sop.archive') || Boolean(item.targetSopId && hasPermission(p, 'sop.archive', 'sop', item.targetSopId)),
+        delete: false
+      }
+    }
+  }
+
+  private async getImported(p: AuthPrincipal, id: string) {
+    if (!this.importService || !id.startsWith('import_')) return null
+    try {
+      return await this.importService.get(p, id)
+    } catch (error) {
+      if (error instanceof Error && 'statusCode' in error && (error as { statusCode?: number }).statusCode === 404) return null
+      throw error
+    }
   }
 
   private output(p: AuthPrincipal, row: DraftRow) {
@@ -128,7 +180,8 @@ export class SopWorkspaceService {
         review: canReview && independent,
         publish: canPublish && independent && row.ReviewedBy !== p.accountId,
         reject: canReview || canPublish,
-        archive: mayManageDraft(p, 'sop.archive', row.DocumentId, preview.moduleIds)
+        archive: row.State === 'published' && (row.CreatedBy === p.accountId || mayManageDraft(p, 'sop.archive', row.DocumentId, preview.moduleIds)),
+        delete: (p.systemRole === 'SUPER_ADMIN' || hasPermission(p, 'sop.delete')) && row.State === 'trash'
       }
     }
   }
@@ -136,20 +189,35 @@ export class SopWorkspaceService {
   async list(p: AuthPrincipal, query: { q?: string; state?: string; page?: number; pageSize?: number }) {
     const rows = await this.repository.list()
     const q = query.q?.trim().toLocaleLowerCase('vi')
-    const visible = rows.filter(row => this.visible(p, row) && (!query.state || row.State === query.state)
+    const workspaceItems = rows.filter(row => this.visible(p, row) && (!query.state || row.State === query.state)
       && (!q || `${this.preview(row).title} ${this.preview(row).code}`.toLocaleLowerCase('vi').includes(q)))
+      .map(row => this.output(p, row))
+    const linkedDocuments = new Set(rows.map(row => row.DocumentId).filter((id): id is string => Boolean(id)))
+    const importedItems = this.importService
+      ? (await this.importService.list(p))
+        .filter(item => !item.targetSopId || !linkedDocuments.has(item.targetSopId))
+        .map(item => this.importOutput(p, item))
+        .filter(item => !query.state || item.state === query.state)
+        .filter(item => !q || `${item.preview.title} ${item.preview.code}`.toLocaleLowerCase('vi').includes(q))
+      : []
+    const visible = [...workspaceItems, ...importedItems].sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))
     const page = query.page ?? 1
     const pageSize = query.pageSize ?? 20
     return {
-      data: visible.slice((page - 1) * pageSize, page * pageSize).map(row => this.output(p, row)),
+      data: visible.slice((page - 1) * pageSize, page * pageSize),
       pagination: { page, pageSize, total: visible.length }
     }
   }
 
   async get(p: AuthPrincipal, id: string) {
     const row = await this.repository.findDraftById(id)
-    if (!row || !this.visible(p, row)) throw notFound('SOP draft', id)
-    return this.output(p, row)
+    if (row) {
+      if (!this.visible(p, row)) throw notFound('SOP draft', id)
+      return this.output(p, row)
+    }
+    const imported = await this.getImported(p, id)
+    if (!imported) throw notFound('SOP draft', id)
+    return this.importOutput(p, imported)
   }
 
   async create(p: AuthPrincipal, input: { documentId?: string; preview?: CreateSopBody }) {
@@ -192,6 +260,12 @@ export class SopWorkspaceService {
   }
 
   async save(p: AuthPrincipal, id: string, revision: number, preview: CreateSopBody) {
+    const imported = await this.getImported(p, id)
+    if (imported) {
+      if (!this.importService) throw notFound('SOP draft', id)
+      await this.importService.update(p, id, preview)
+      return this.get(p, id)
+    }
     await this.repository.transaction(async runner => {
       const row = await this.repository.findDraftById(id, true, runner)
       if (!row) throw notFound('SOP draft', id)
@@ -212,6 +286,35 @@ export class SopWorkspaceService {
   }
 
   async action(p: AuthPrincipal, id: string, revision: number, action: Action, note?: string) {
+    const imported = await this.getImported(p, id)
+    if (imported) {
+      if (!this.importService) throw notFound('SOP draft', id)
+      if (action === 'reject') throw conflict('IMPORT_REJECT_UNSUPPORTED', 'Hồ sơ chuyển hóa cần được rút về chỉnh sửa thay vì trả lại trực tiếp')
+      if (action === 'submit') {
+        await this.importService.accept(p, id)
+        return this.get(p, id)
+      }
+      if (action === 'review') {
+        await this.importService.review(p, id, note)
+        return this.get(p, id)
+      }
+      if (action === 'publish') {
+        await this.importService.publish(p, id)
+        return this.get(p, id)
+      }
+      if (action === 'archive') {
+        await this.importService.archive(p, id)
+        return this.get(p, id)
+      }
+      if (action === 'restore') {
+        const revised = await this.importService.revise(p, id)
+        return this.importOutput(p, revised)
+      }
+      if (action === 'trash') {
+        await this.importService.delete(p, id)
+        return { ...this.importOutput(p, imported), state: 'trash' as const, updatedAt: new Date() }
+      }
+    }
     let changedDocumentId: string | null = null
     await this.repository.transaction(async runner => {
       const row = await this.repository.findDraftById(id, true, runner)
@@ -221,7 +324,8 @@ export class SopWorkspaceService {
       if (row.Revision !== revision) throw conflict('SOP_REVISION_CONFLICT', 'SOP đã thay đổi; hãy tải lại trước khi thao tác')
 
       const permission = action === 'review' ? 'sop.review' : action === 'publish' ? 'sop.publish' : action === 'archive' ? 'sop.archive' : null
-      if (permission && !mayManageDraft(p, permission, row.DocumentId, preview.moduleIds)) throw forbidden()
+      const ownerArchive = action === 'archive' && row.State === 'published' && row.CreatedBy === p.accountId
+      if (permission && !ownerArchive && !mayManageDraft(p, permission, row.DocumentId, preview.moduleIds)) throw forbidden()
       if (action === 'reject') {
         if (!['sop.review', 'sop.publish'].some(code => mayManageDraft(p, code, row.DocumentId, preview.moduleIds))) throw forbidden()
         if (!note?.trim()) throw conflict('SOP_REASON_REQUIRED', 'Hãy ghi lý do yêu cầu chỉnh sửa')
@@ -301,5 +405,162 @@ export class SopWorkspaceService {
     }
 
     return this.get(p, id)
+  }
+
+  async archivePublishedDocument(p: AuthPrincipal, documentId: string, reason: string, expectedVersion: number) {
+    if (!reason || !reason.trim()) throw conflict('SOP_REASON_REQUIRED', 'Lý do thu hồi là bắt buộc')
+    let currentVersion = 0
+    let sopCode = ''
+    await this.repository.transaction(async runner => {
+      const moduleIds = await this.repository.findDocumentModules(documentId, runner)
+      const hasArchivePermission = mayManageDraft(p, 'sop.archive', documentId, moduleIds)
+      const [ownerRow] = !hasArchivePermission && typeof (runner as { query?: unknown }).query === 'function'
+        ? await runner.query<{ CreatedBy: string | null }>(
+          `SELECT ${this.repository.provider === 'sqlserver' ? 'TOP 1 ' : ''}CreatedBy
+           FROM KnowledgeDocumentVersion
+           WHERE DocumentId = :id AND Status = 'published'
+           ORDER BY VersionNumber DESC${this.repository.provider === 'sqlserver' ? '' : ' LIMIT 1'}`,
+          { id: documentId }
+        )
+        : []
+      const ownerArchive = ownerRow?.CreatedBy === p.accountId
+      if (!ownerArchive && !hasArchivePermission) throw forbidden()
+
+      const [doc] = await runner.query<{
+        DocumentId: string
+        Code: string
+        Title: string
+        Summary: string
+        CurrentVersionNumber: number
+        Status: string
+        ContentJson: unknown
+      }>(
+        `SELECT ${this.repository.provider === 'sqlserver' ? 'TOP 1 ' : ''}DocumentId, Code, Title, Summary, CurrentVersionNumber, Status, ContentJson FROM KnowledgeDocument WHERE DocumentId = :id${this.repository.provider === 'sqlserver' ? '' : ' FOR UPDATE'}`,
+        { id: documentId }
+      )
+      if (!doc) throw notFound('SOP', documentId)
+      if (doc.Status !== 'published') {
+        throw conflict('SOP_NOT_PUBLISHED', 'Chỉ tài liệu đang công bố mới được phép thu hồi')
+      }
+      if (doc.CurrentVersionNumber !== expectedVersion) {
+        throw conflict('SOP_VERSION_CONFLICT', 'Phiên bản tài liệu đã thay đổi; hãy tải lại trước khi thu hồi')
+      }
+
+      currentVersion = doc.CurrentVersionNumber
+      sopCode = doc.Code
+
+      await runner.query("UPDATE KnowledgeDocument SET Status = 'archived' WHERE DocumentId = :id", { id: documentId })
+
+      const existingDraft = await this.repository.findDraftByDocumentId(documentId, runner)
+      if (existingDraft) {
+        await runner.query(
+          "UPDATE SopWorkspaceDraft SET State = 'archived', Note = :reason, BaseVersion = :version, UpdatedAt = CURRENT_TIMESTAMP(3) WHERE DraftId = :id",
+          { id: existingDraft.DraftId, reason: reason.trim(), version: currentVersion }
+        )
+      } else {
+        const draftId = createId('draft')
+        const original = jsonValue(doc.ContentJson) ?? {}
+        const preview = workspacePreview(doc, original, moduleIds)
+        await this.repository.insertDraft({
+          id: draftId,
+          documentId,
+          baseVersion: currentVersion,
+          preview,
+          original,
+          actor: p.accountId
+        }, runner)
+        await runner.query(
+          "UPDATE SopWorkspaceDraft SET State = 'archived', Note = :reason WHERE DraftId = :id",
+          { id: draftId, reason: reason.trim() }
+        )
+      }
+
+      await runner.query(
+        `INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, BeforeJson, AfterJson)
+         VALUES ('knowledge-document', :documentId, 'archive', :actor, :before, :after)`,
+        {
+          documentId,
+          actor: p.accountId,
+          before: JSON.stringify({ documentId, version: currentVersion, status: doc.Status }),
+          after: JSON.stringify({
+            documentId,
+            actor: p.accountId,
+            action: 'archive',
+            reason: reason.trim(),
+            previousVersion: currentVersion,
+            newStatus: 'archived'
+          })
+        }
+      )
+    })
+
+    if (this.indexingService) {
+      try {
+        await this.indexingService.removeEntity(documentId)
+      } catch {
+        // Non-fatal index removal failure handled gracefully
+      }
+    }
+
+    return {
+      success: true,
+      documentId,
+      code: sopCode,
+      version: currentVersion,
+      status: 'archived',
+      message: 'Đã thu hồi SOP khỏi Thư viện quy trình thành công'
+    }
+  }
+
+  async permanentDelete(p: AuthPrincipal, id: string, confirmCode: string) {
+    const isSuperAdmin = p.systemRole === 'SUPER_ADMIN'
+    const hasDeleteCap = hasPermission(p, 'sop.delete')
+    if (!isSuperAdmin && !hasDeleteCap) throw forbidden()
+
+    let deletedCode = ''
+    await this.repository.transaction(async runner => {
+      const row = await this.repository.findDraftById(id, true, runner)
+      if (!row) throw notFound('SOP draft', id)
+
+      if (row.State === 'published') {
+        throw conflict('SOP_PUBLISHED_CANNOT_DELETE', 'Không được phép xóa vĩnh viễn SOP đang công bố')
+      }
+      if (row.State !== 'trash') {
+        throw conflict('SOP_NOT_IN_TRASH', 'Chỉ có thể xóa vĩnh viễn bản ghi đang ở trong Thùng rác')
+      }
+
+      const preview = this.preview(row)
+      if (!confirmCode || confirmCode.trim().toUpperCase() !== preview.code.trim().toUpperCase()) {
+        throw conflict('CONFIRM_CODE_MISMATCH', `Mã xác nhận "${confirmCode}" không khớp với mã SOP "${preview.code}"`)
+      }
+
+      deletedCode = preview.code
+
+      await runner.query(
+        `INSERT INTO AuditLog (EntityType, EntityId, Action, ActorAccountId, BeforeJson, AfterJson)
+         VALUES ('sop-workspace', :id, 'permanent-delete', :actor, :before, NULL)`,
+        {
+          id,
+          actor: p.accountId,
+          before: JSON.stringify({
+            draftId: id,
+            documentId: row.DocumentId,
+            code: preview.code,
+            title: preview.title,
+            state: row.State,
+            revision: row.Revision
+          })
+        }
+      )
+
+      await this.repository.deleteDraft(id, runner)
+    })
+
+    return {
+      success: true,
+      id,
+      code: deletedCode,
+      message: 'Đã xóa vĩnh viễn hồ sơ SOP thành công'
+    }
   }
 }
