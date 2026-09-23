@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox'
 
 export const runtimeDatasetKeys = [
-  'translations', 'sop.dictionary', 'page.businessNodes', 'coreOperations.config',
+  'translations', 'sop.dictionary', 'page.businessNodes', 'coreOperations.config', 'core-operations',
   'crossFunctional.registry', 'masterData.catalog', 'lifecycle.journey',
   'lifecycleStepper.modules', 'erd.clusters', 'policy.registry'
 ] as const

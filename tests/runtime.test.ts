@@ -15,7 +15,12 @@ const workflows = {
   'MODULE-PAY': [{ sopCode: 'SOP-PAY-01', sopTitle: 'Lương', description: 'Tính lương', steps: [{ stepCode: '1', title: 'Kiểm tra', description: 'private body' }] }],
   'LIFE-03': [{ sopCode: 'SOP-EMP-01', sopTitle: 'Nhân sự', description: 'Hồ sơ', steps: [] }]
 }
-const datasets: Record<string, unknown> = { 'workflow.sopDatabase': workflows, 'policy.registry': [], translations: {} }
+const datasets: Record<string, unknown> = {
+  'workflow.sopDatabase': workflows,
+  'policy.registry': [],
+  'coreOperations.config': { stageMap: { emp: { id: 'emp' }, pay: { id: 'pay' } } },
+  translations: {}
+}
 const queries: string[] = []
 const repository = new RuntimeRepository({ async query<T extends object>(sql: string, params: DatabaseParameters = {}): Promise<T[]> {
   queries.push(sql)
@@ -92,6 +97,18 @@ describe('incremental knowledge reads', () => {
       expect(response.statusCode).toBe(200)
       expect(response.headers['cache-control']).toBe('private, no-store')
       expect(response.json().pagination.total).toBe(1)
+    } finally { await app.close() }
+  })
+  it('serves the extension-free core operations URL with the same scoped data', async () => {
+    const app = Fastify()
+    await app.register(runtimeRoutes({ authenticate: async () => principal } as unknown as AuthService, repository, modules))
+    try {
+      const alias = await app.inject('/ui/datasets/core-operations')
+      const legacy = await app.inject('/ui/datasets/coreOperations.config')
+      expect(alias.statusCode).toBe(200)
+      expect(alias.json()).toEqual(legacy.json())
+      expect(Object.keys(alias.json().data.stageMap)).toEqual(['emp'])
+      expect(alias.headers['cache-control']).toBe('private, no-store')
     } finally { await app.close() }
   })
   it('uses stable contextual IDs and canonical hashes', () => {
